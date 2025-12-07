@@ -1,0 +1,87 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 19,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build-${presetName}",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "clang",
+      "inherits": "base",
+      "displayName": "Clang + Sanitizers",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang",
+        "ENABLE_SANITIZERS": "ON"
+      }
+    },
+    {
+      "name": "gcc",
+      "inherits": "base",
+      "displayName": "GCC + Sanitizers",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "gcc",
+        "ENABLE_SANITIZERS": "ON"
+      }
+    },
+    {
+      "name": "tcc",
+      "inherits": "base",
+      "displayName": "TinyCC",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "tcc",
+        "ENABLE_SANITIZERS": "OFF"
+      }
+    },
+    {
+      "name": "mingw",
+      "inherits": "base",
+      "displayName": "MinGW Windows Cross",
+      "cacheVariables": {
+        "CMAKE_SYSTEM_NAME": "Windows",
+        "CMAKE_C_COMPILER": "x86_64-w64-mingw32-gcc",
+        "CMAKE_RC_COMPILER": "x86_64-w64-mingw32-windres",
+        "ENABLE_SANITIZERS": "OFF"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "clang", "configurePreset": "clang" },
+    { "name": "gcc", "configurePreset": "gcc" },
+    { "name": "tcc", "configurePreset": "tcc" },
+    { "name": "mingw", "configurePreset": "mingw" }
+  ],
+  "testPresets": [
+    { 
+      "name": "clang", 
+      "configurePreset": "clang",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    { 
+      "name": "gcc", 
+      "configurePreset": "gcc", 
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    { 
+      "name": "tcc", 
+      "configurePreset": "tcc", 
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}
