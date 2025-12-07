@@ -1,101 +1,100 @@
 cmake_minimum_required(VERSION 3.16)
 project(word_parser_performance C)
 
+# --- Options ---
+option(ENABLE_SANITIZERS "Enable Address and Undefined Behavior Sanitizers" OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# Strict warnings globally
-add_compile_options(
-    -Wall
-    -Wextra
-    -Wpedantic
-    -Wconversion
-    -Wshadow
-)
+# --- Compiler Configuration ---
+
+if(CMAKE_C_COMPILER_ID MATCHES "TinyCC")
+    # TinyCC is very basic: strict warnings but no fancy stuff
+    add_compile_options(-Wall)
+    # TCC doesn't support sanitizers, so we ignore ENABLE_SANITIZERS here
+
+elseif(MSVC)
+    # Visual Studio / MSVC
+    add_compile_options(/W4 /permissive-)
+    if(ENABLE_SANITIZERS)
+        add_compile_options(/fsanitize=address)
+    endif()
+
+elseif(MINGW)
+    # MinGW (Windows cross-compile on Linux)
+    # We use static linking so we don't need to copy DLLs to run tests via Wine
+    add_link_options(-static)
+    add_compile_options(-Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+    
+    # MinGW often lacks full sanitizer support depending on the version
+    if(ENABLE_SANITIZERS)
+        message(STATUS "Note: Sanitizers disabled for MinGW build to ensure stability")
+    endif()
+
+else()
+    # GCC / Clang (Linux Native)
+    add_compile_options(-Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+
+    if(ENABLE_SANITIZERS)
+        add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
+        add_link_options(-fsanitize=address,undefined)
+    endif()
+endif()
+
+# --- Helper: Apply C99 strictness ---
+function(configure_c99_strict target)
+    set_target_properties(${target} PROPERTIES
+        C_STANDARD 99
+        C_STANDARD_REQUIRED ON
+        C_EXTENSIONS OFF
+    )
+endfunction()
 
 # =============================================================================
-# Core library variants (C99) - files in root
+# Core library variants
 # =============================================================================
 
-# Default configuration: stack scan buffer, platform-tuned sizing
+# 1. Default (Stack buffer, platform sizing)
 add_library(wordcount_lib STATIC wordcount.c)
 target_include_directories(wordcount_lib PUBLIC .)
-set_target_properties(wordcount_lib PROPERTIES
-    C_STANDARD 99
-    C_STANDARD_REQUIRED ON
-    C_EXTENSIONS OFF
-)
+configure_c99_strict(wordcount_lib)
 
-# Heap scan buffer configuration: WC_STACK_BUFFER=0
-# This exercises the !WC_STACK_BUFFER path in wordcount.c.
+# 2. Heap (Force heap buffer via WC_STACK_BUFFER=0)
 add_library(wordcount_lib_heap STATIC wordcount.c)
 target_include_directories(wordcount_lib_heap PUBLIC .)
 target_compile_definitions(wordcount_lib_heap PUBLIC WC_STACK_BUFFER=0)
-set_target_properties(wordcount_lib_heap PROPERTIES
-    C_STANDARD 99
-    C_STANDARD_REQUIRED ON
-    C_EXTENSIONS OFF
-)
+configure_c99_strict(wordcount_lib_heap)
 
-# Tiny-profile configuration: simulates a constrained MCU build.
-# Smaller floors for table capacity and arena block size, reduced max word,
-# and heap-based scan buffer to avoid large stack allocations.
+# 3. Tiny (MCU simulation)
 add_library(wordcount_lib_tiny STATIC wordcount.c)
 target_include_directories(wordcount_lib_tiny PUBLIC .)
 target_compile_definitions(wordcount_lib_tiny PUBLIC
-    WC_STACK_BUFFER=0   # no fixed 1KB stack buffer
-    WC_MIN_INIT_CAP=8   # smaller hash table floor
-    WC_MIN_BLOCK_SZ=64  # smaller arena floor
-    WC_MAX_WORD=32      # small maximum word length
+    WC_STACK_BUFFER=0
+    WC_MIN_INIT_CAP=8
+    WC_MIN_BLOCK_SZ=64
+    WC_MAX_WORD=32
 )
-set_target_properties(wordcount_lib_tiny PROPERTIES
-    C_STANDARD 99
-    C_STANDARD_REQUIRED ON
-    C_EXTENSIONS OFF
-)
+configure_c99_strict(wordcount_lib_tiny)
 
 # =============================================================================
-# CLI using the default library
+# Executables
 # =============================================================================
+
 add_executable(wc wc_main.c)
 target_link_libraries(wc PRIVATE wordcount_lib)
-set_target_properties(wc PROPERTIES
-    C_STANDARD 99
-    C_STANDARD_REQUIRED ON
-    C_EXTENSIONS OFF
-)
+configure_c99_strict(wc)
 
 # =============================================================================
 # Tests
 # =============================================================================
-
-# Default test binary (stack scan buffer, default sizing)
-add_executable(wc_test wc_test.c)
-target_link_libraries(wc_test PRIVATE wordcount_lib)
-set_target_properties(wc_test PROPERTIES
-    C_STANDARD 99
-    C_STANDARD_REQUIRED ON
-    C_EXTENSIONS OFF
-)
-
-# Heap-buffer test binary (WC_STACK_BUFFER=0 for library)
-add_executable(wc_test_heap wc_test.c)
-target_link_libraries(wc_test_heap PRIVATE wordcount_lib_heap)
-set_target_properties(wc_test_heap PROPERTIES
-    C_STANDARD 99
-    C_STANDARD_REQUIRED ON
-    C_EXTENSIONS OFF
-)
-
-# Tiny-profile test binary (MCU-style config)
-add_executable(wc_test_tiny wc_test.c)
-target_link_libraries(wc_test_tiny PRIVATE wordcount_lib_tiny)
-set_target_properties(wc_test_tiny PROPERTIES
-    C_STANDARD 99
-    C_STANDARD_REQUIRED ON
-    C_EXTENSIONS OFF
-)
-
 enable_testing()
-add_test(NAME wc_unit_tests       COMMAND wc_test)
-add_test(NAME wc_unit_tests_heap  COMMAND wc_test_heap)
-add_test(NAME wc_unit_tests_tiny  COMMAND wc_test_tiny)
+
+function(create_test_variant name lib)
+    add_executable(${name} wc_test.c)
+    target_link_libraries(${name} PRIVATE ${lib})
+    configure_c99_strict(${name})
+    add_test(NAME ${name} COMMAND ${name})
+endfunction()
+
+create_test_variant(wc_test      wordcount_lib)
+create_test_variant(wc_test_heap wordcount_lib_heap)
+create_test_variant(wc_test_tiny wordcount_lib_tiny)
