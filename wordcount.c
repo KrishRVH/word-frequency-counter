@@ -757,8 +757,9 @@ wc *wc_open_ex(size_t max_word, const wc_limits *limits)
                 goto fail;
             align_slack = 3u * (size_t)(WC_ALIGN - 1u);
 
-            if (!add_overflows(need, align_slack))
-                need += align_slack;
+            if (add_overflows(need, align_slack))
+                goto fail;
+            need += align_slack;
         }
 
         eff_budget = w->sbuf_size;
