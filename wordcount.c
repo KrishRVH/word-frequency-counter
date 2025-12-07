@@ -673,10 +673,12 @@ wc *wc_open_ex(size_t max_word, const wc_limits *limits)
         ** Misaligned buffers are rejected deterministically.
         */
         if (((uintptr_t)limits->static_buf % WC_ALIGN) != 0) {
+#else
+        if (((size_t)limits->static_buf % WC_ALIGN) != 0) {
+#endif
             WC_FREE(w);
             return NULL;
         }
-#endif
     } else {
         w->static_mode = 0;
         w->sbuf = NULL;
@@ -743,7 +745,6 @@ wc *wc_open_ex(size_t max_word, const wc_limits *limits)
             goto fail;
         need += w->maxw;
 #endif
-
         /*
         ** Account for worst-case alignment padding: we perform at
         ** most three allocations (table, first block, scan buffer)
