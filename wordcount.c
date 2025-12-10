@@ -4,6 +4,27 @@
 **
 ** Core implementation of the wordcount library. See wordcount.h
 ** for API, configuration macros, and detailed documentation.
+**
+** NOTES
+**
+**   - This file implements only the core library (wc_open, wc_scan,
+**     wc_add, wc_results, etc.). The CLI (wc_main.c) is responsible
+**     for streaming stdin and mmap-based file I/O.
+**
+**   - All internal allocations are routed through wc_alloc_state so
+**     memory limits and static-buffer mode are enforced consistently.
+**     The only exception is the caller-owned array returned by
+**     wc_results(), which is allocated via WC_MALLOC and explicitly
+**     documented as *not* counted against internal limits.
+**
+**   - The implementation assumes a hosted C99 environment with:
+**       * CHAR_BIT == 8
+**       * ASCII-compatible execution character set
+**         ('A'..'Z' == 65..90, 'a'..'z' == 97..122)
+**     These are enforced via compile-time assertions.
+**
+**   - Exact-width integer types are not required by the public API.
+**     <stdint.h> is used here only for SIZE_MAX / UINTPTR_MAX checks.
 */
 
 #include "wordcount.h"
@@ -27,7 +48,7 @@
 ** Prefer C11 _Static_assert when available; otherwise fall back to a
 ** negative-array-size trick that is widely supported on C99
 ** toolchains. This is the same style used in many production C
-** libraries (e.g. SQLite).
+** libraries (e.g., SQLite).
 */
 #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 #define WC_STATIC_ASSERT(cond, msg) _Static_assert(cond, #msg)
@@ -36,6 +57,10 @@
     typedef char wc_static_assert_##msg[(cond) ? 1 : -1]
 #endif
 
+/*
+** Require an ASCII-compatible execution character set and 8-bit char.
+** On non-ASCII systems (e.g., EBCDIC) this will fail at compile time.
+*/
 WC_STATIC_ASSERT('A' == 65 && 'Z' == 90 && 'a' == 97 && 'z' == 122 &&
                          ('a' ^ 'A') == 32,
                  ascii_charset_required);
@@ -144,6 +169,23 @@ typedef struct {
 
 /* --- Internal allocation state ---------------------------------------- */
 
+/*
+** All internal allocations (hash table, arena blocks, optional scan
+** buffer when WC_STACK_BUFFER == 0) are tracked through this state.
+**
+** Dynamic mode:
+**   - static_mode == 0
+**   - allocations use WC_MALLOC / WC_FREE
+**   - bytes_used is kept in sync and enforced against bytes_limit
+**
+** Static-buffer mode:
+**   - static_mode == 1
+**   - allocations are carved from [sbuf, sbuf + sbuf_size) via
+**     a bump allocator with WC_ALIGN alignment
+**   - allocations are zero-initialized
+**   - bytes_used and sbuf_used grow monotonically; there is no
+**     reuse or free inside the static buffer
+*/
 typedef struct {
     /* Common to dynamic and static modes. */
     size_t bytes_used;   /* sum of payload bytes allocated internally */
@@ -169,7 +211,7 @@ struct wc {
     wc_alloc_state alloc;
 
 #if !WC_STACK_BUFFER
-    char *scanbuf;
+    char *scanbuf; /* per-instance scan buffer (size maxw) */
 #endif
 };
 
@@ -230,31 +272,31 @@ static void *wc_xmalloc_state(wc_alloc_state *st, size_t n)
     }
 
     /* Static-buffer mode: bump allocator within [sbuf, sbuf+sbuf_size). */
-{
-    size_t align = WC_ALIGN;
-    size_t off = st->sbuf_used;
-    size_t pad = (align - (off % align)) % align;
-    size_t new_used;
+    {
+        size_t align = WC_ALIGN;
+        size_t off = st->sbuf_used;
+        size_t pad = (align - (off % align)) % align;
+        size_t new_used;
 
-    if (add_overflows(pad, n))
-        return NULL;
-    if (add_overflows(st->sbuf_used, pad + n))
-        return NULL;
+        if (add_overflows(pad, n))
+            return NULL;
+        if (add_overflows(st->sbuf_used, pad + n))
+            return NULL;
 
-    if (st->sbuf_used + pad + n > st->sbuf_size)
-        return NULL;
+        if (st->sbuf_used + pad + n > st->sbuf_size)
+            return NULL;
 
-    if (add_overflows(st->bytes_used, n))
-        return NULL;
-    new_used = st->bytes_used + n;
-    if (st->bytes_limit && new_used > st->bytes_limit)
-        return NULL;
+        if (add_overflows(st->bytes_used, n))
+            return NULL;
+        new_used = st->bytes_used + n;
+        if (st->bytes_limit && new_used > st->bytes_limit)
+            return NULL;
 
-    p = (void *)(st->sbuf + st->sbuf_used + pad);
-    st->sbuf_used += pad + n;
-    st->bytes_used = new_used;
-    return memset(p, 0, n);
-}
+        p = (void *)(st->sbuf + st->sbuf_used + pad);
+        st->sbuf_used += pad + n;
+        st->bytes_used = new_used;
+        return memset(p, 0, n);
+    }
 }
 
 /*
@@ -560,6 +602,19 @@ static int tab_insert(wc *w, const char *word, size_t n, wc_hash_t h)
 
 /* --- Parameter tuning based on limits --------------------------------- */
 
+/*
+** Derive initial hash table capacity and arena block size from
+** wc_limits (if provided) and the global defaults.
+**
+** Heuristic:
+**   - Start from WC_DEFAULT_INIT_CAP / WC_DEFAULT_BLOCK_SZ.
+**   - If a budget can be inferred from max_bytes and/or static_size,
+**     trim the initial table size so that its byte cost is not more
+**     than half the budget, and limit the first arena block to at
+**     most a quarter of the remaining half.
+**   - Apply floors WC_MIN_INIT_CAP and WC_MIN_BLOCK_SZ.
+**   - Round init_cap up to a power of two.
+*/
 static void
 tune_params(const wc_limits *lim, size_t *init_cap, size_t *block_sz)
 {

@@ -11,7 +11,17 @@
 **
 **   Stdin is processed in streaming chunks to keep host memory usage
 **   bounded. A small carry buffer is used to handle words that span
-**   chunk boundaries so behavior matches wc_scan() on the full stream.
+**   chunk boundaries. The streaming scanner implements the same word
+**   model as wc_scan():
+**
+**     - ASCII letters A–Z/a–z are word characters.
+**     - All other bytes are separators.
+**     - Words are lowercased and truncated to the library’s max_word
+**       before insertion, via wc_add().
+**
+**   The net effect is equivalent to running wc_scan() on the entire
+**   stdin stream as a single contiguous buffer, but without needing to
+**   materialize that buffer in memory.
 **
 **   On Windows, command-line arguments are obtained in UTF-16 via
 **   GetCommandLineW/CommandLineToArgvW, converted to UTF-8, and file
@@ -80,16 +90,24 @@ static int parse_wc_limits_from_env(wc_limits *lim)
     return 1;
 }
 
-/* --- Streaming scan for stdin ----------------------------------------- */
+/* --- Streaming scanner for stdin -------------------------------------- */
 
 /*
 ** Small carry buffer to hold a partial word that spans chunk
 ** boundaries. We size it at WC_MAX_WORD+1 to always have room for a
 ** terminating NUL when calling wc_add().
+**
+** NOTE
+**
+**   - The library’s runtime max_word (w->maxw) is clamped to
+**     WC_MAX_WORD, so storing up to WC_MAX_WORD characters here is
+**     safe: wc_add() will only consider the first max_word bytes.
+**   - We lowercase characters here so that stdin scanning matches the
+**     case-folding semantics of wc_scan().
 */
 typedef struct {
-    char carry[WC_MAX_WORD + 1];
-    size_t carry_len;
+    char buf[WC_MAX_WORD + 1];
+    size_t len;
 } ScanState;
 
 static int isalpha_ascii(unsigned char c)
@@ -98,101 +116,48 @@ static int isalpha_ascii(unsigned char c)
 }
 
 /*
-** Scan a single chunk, preserving behavior equivalent to a single
-** wc_scan() over the concatenated stream:
+** Scan a single stdin chunk.
 **
-**   - Any partial trailing word from the previous chunk is extended.
-**   - When that word terminates, it is flushed via wc_add().
-**   - The middle region (between carry completion and trailing
-**     partial run) is passed to wc_scan() directly.
-**   - A new trailing partial word is copied into carry.
+** This is a streaming implementation of the same word model used by
+** wc_scan():
+**
+**   - Reads bytes in order.
+**   - Treats maximal runs of ASCII letters as words.
+**   - Lowercases letters using the 'c | 32' trick.
+**   - Truncates each word to at most WC_MAX_WORD bytes in the carry
+**     buffer; wc_add() will further clamp to the instance’s max_word.
+**
+** Words that cross chunk boundaries are assembled incrementally in
+** ScanState and flushed exactly once when the first non-letter
+** separator after the run is seen (or on EOF).
 */
 static int
-scan_chunk(wc *w, ScanState *st, const char *buf, size_t len)
+scan_chunk_stream(wc *w, ScanState *st, const char *buf, size_t len)
 {
-    size_t i = 0;
+    const unsigned char *p = (const unsigned char *)buf;
+    const unsigned char *end = p + len;
 
-    /* First, extend any partial word from the previous chunk. */
-    while (st->carry_len > 0 && i < len &&
-           isalpha_ascii((unsigned char)buf[i])) {
-        if (st->carry_len < WC_MAX_WORD) {
-            st->carry[st->carry_len++] =
-                    (char)((unsigned char)buf[i] | 32u);
-        }
-        i++;
-    }
+    while (p < end) {
+        unsigned char c = *p++;
 
-    if (st->carry_len > 0) {
-        /* We either hit a non-letter (word complete) or buffer end. */
-        if (i == len) {
-            /* Still a partial word; wait for more data. */
-            return WC_OK;
-        }
+        if (isalpha_ascii(c)) {
+            c = (unsigned char)(c | 32u);
+            if (st->len < WC_MAX_WORD) {
+                st->buf[st->len++] = (char)c;
+            }
+        } else {
+            if (st->len > 0) {
+                int rc;
 
-        /* Terminated by a separator: flush the carried word. */
-        if (st->carry_len > WC_MAX_WORD)
-            st->carry_len = WC_MAX_WORD;
-        st->carry[st->carry_len] = '\0';
-
-        {
-            int rc = wc_add(w, st->carry);
-            if (rc != WC_OK)
-                return rc;
-        }
-
-        st->carry_len = 0;
-
-        /* Skip the separator that ended the word. */
-        while (i < len &&
-               !isalpha_ascii((unsigned char)buf[i])) {
-            i++;
+                st->buf[st->len] = '\0';
+                rc = wc_add(w, st->buf);
+                if (rc != WC_OK)
+                    return rc;
+                st->len = 0;
+            }
         }
     }
 
-    /*
-    ** Now process the rest of the chunk with wc_scan, but without
-    ** depending on clean word boundaries. We scan all but a trailing
-    ** run of letters that may extend into the next chunk.
-    */
-
-    /* Find length of trailing run of letters. */
-    
-{
-    size_t tail = 0;
-    size_t main_len;
-
-    while (i + tail < len) {
-        unsigned char c =
-                (unsigned char)buf[len - 1 - tail];
-        if (!isalpha_ascii(c))
-            break;
-        tail++;
-        if (tail >= WC_MAX_WORD)
-            break; /* only need up to max word length */
-    }
-
-    main_len = (len - i) - tail;
-
-    if (main_len > 0) {
-        int rc = wc_scan(w, buf + i, main_len);
-        if (rc != WC_OK)
-            return rc;
-    }
-
-    /* Save trailing partial word (if any) into carry. */
-    if (tail > 0) {
-        size_t copy = tail < WC_MAX_WORD ? tail : WC_MAX_WORD;
-        size_t start = len - tail;
-
-        st->carry_len = 0;
-        for (size_t j = 0; j < copy; j++) {
-            unsigned char c =
-                    (unsigned char)buf[start + j];
-            st->carry[st->carry_len++] =
-                    (char)(c | 32u);
-        }
-    }
-}
     return WC_OK;
 }
 
@@ -608,10 +573,11 @@ static int process_stdin(wc *w)
     int rc;
 
     memset(&st, 0, sizeof st);
+
     for (;;) {
         size_t n = fread(buf, 1, sizeof buf, stdin);
         if (n > 0) {
-            rc = scan_chunk(w, &st, buf, n);
+            rc = scan_chunk_stream(w, &st, buf, n);
             if (rc != WC_OK) {
                 (void)fprintf(stderr,
                               "wc: <stdin>: %s\n",
@@ -630,12 +596,10 @@ static int process_stdin(wc *w)
         }
     }
 
-    /* Flush any remaining carry as a final word. */
-    if (st.carry_len > 0) {
-        if (st.carry_len > WC_MAX_WORD)
-            st.carry_len = WC_MAX_WORD;
-        st.carry[st.carry_len] = '\0';
-        rc = wc_add(w, st.carry);
+    /* Flush any remaining partial word at EOF. */
+    if (st.len > 0) {
+        st.buf[st.len] = '\0';
+        rc = wc_add(w, st.buf);
         if (rc != WC_OK) {
             (void)fprintf(stderr,
                           "wc: <stdin>: %s\n",
