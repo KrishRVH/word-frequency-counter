@@ -59,19 +59,19 @@ The `wordcount` library provides a **small, robust, and embeddable** API for cou
 - **Predictable**: all allocations are overflow-checked; behavior on `WC_NOMEM` is defined and tested.
 - **Portable**: pure C99 core, with no dependencies beyond the standard C library.
 - **Configurable**: suitable both for desktop/server workloads and resource-constrained embedded systems.
-- **Defensive**: fails fast on unsupported platforms (non-ASCII, weird pointer alignments) via compile-time checks.
+- **Defensive**: fails fast on unsupported platforms (non-ASCII, weird character encodings) via compile-time checks.
 - **Inspectable**: build-time configuration is available at runtime via `wc_build_info()`.
 
 The core implementation resides in:
 
-- `library/wordcount.h` – public API
-- `library/wordcount.c` – implementation
+- `wordcount.h` – public API  
+- `wordcount.c` – implementation  
 
 On top of the library, the repository ships:
 
-- `library/wc_main.c` – a CLI tool using memory-mapped I/O
-- `library/wc_test.c` – a comprehensive test suite with optional OOM injection
-- `wordcount.c`, `wordcount_hyperopt.c` – standalone benchmark/experiment implementations (C11; not part of the core library API)
+- `wc_main.c` – a CLI tool using memory-mapped I/O for files and streaming for stdin
+- `wc_test.c` – a comprehensive test suite with optional OOM injection
+- `wordcount_hyperopt.c` – standalone benchmark/experiment implementation (C11; not part of the core library API)
 
 ---
 
@@ -101,7 +101,7 @@ The library deliberately does **not** try to:
 - Provide Unicode word segmentation or locale-aware rules  
   Word detection is strictly ASCII-letter based (A–Z, a–z); all other bytes are separators.
 - Be the fastest possible implementation on x86-64  
-  Separate benchmark implementations (`wordcount_hyperopt.c`) exist for that.
+  Separate benchmark implementations (e.g., `wordcount_hyperopt.c`) exist for that.
 - Expose complex concurrency primitives  
   The library is re-entrant and per-instance thread-safe; it does not manage threads.
 - Support arbitrary text encodings or EBCDIC  
@@ -144,10 +144,10 @@ Hash function:
 
 - FNV-1a (32-bit), widened to `unsigned long`:
 
-```c
-h ^= (unsigned char)c;
-h *= 16777619u;
-```
+  ```c
+  h ^= (unsigned char)c;
+  h *= 16777619u;
+  ```
 
 For portability, the library does not expose exact-width types in the API; internally it uses a widened 32-bit hash stored in `unsigned long`.
 
@@ -162,7 +162,7 @@ Word strings are stored in an arena:
   - Flexible buffer: `buf[]`
 - Allocations:
   - Bump-pointer within current block
-  - Simple alignment to `sizeof(void *)`
+  - Simple alignment to an internal union type that safely covers `void *`, `size_t`, and `unsigned long`
   - Zero-initialized memory for safety
 
 In static-buffer mode:
@@ -172,7 +172,7 @@ In static-buffer mode:
 
 ### Memory Accounting and Limits
 
-Internal allocations (hash table, arena blocks, optional heap scan buffer) are accounted in `bytes_used`, up to `bytes_limit`:
+Internal allocations (hash table, arena blocks, optional heap/static scan buffer) are accounted in `bytes_used`, up to `bytes_limit`:
 
 - In **dynamic mode** (no static buffer):
   - `bytes_limit` (from `wc_limits.max_bytes`) caps internal allocations.
@@ -189,7 +189,7 @@ Allocations that would exceed limits:
 
 ### Static Buffer (MCU / No-malloc Mode)
 
-Internally, the library uses a private union type to choose a conservative alignment (covering `void *`, `size_t`, and `unsigned long`) for all bump allocations carved from `static_buf`
+Internally, the library uses a private union type to choose a conservative alignment (covering at least `void *`, `size_t`, and `unsigned long`) for all bump allocations carved from `static_buf`.
 
 For MCU-style environments without reliable `malloc`/`free`, `wc_limits` can be configured with:
 
@@ -198,7 +198,7 @@ For MCU-style environments without reliable `malloc`/`free`, `wc_limits` can be 
 
 In this mode:
 
-- **All internal allocations** (hash table, first arena block, heap scan buffer when `WC_STACK_BUFFER == 0`) use a simple bump allocator within the static buffer.
+- **All internal allocations** (hash table, first arena block, heap/static scan buffer when `WC_STACK_BUFFER == 0`) use a simple bump allocator within the static buffer.
 - **No re-use** or freeing occurs inside the buffer.
 - **Hash table growth is disabled**:
   - Once the load factor exceeds ~0.7, further inserts fail with `WC_NOMEM`.
@@ -209,13 +209,12 @@ The handle (`struct wc`) itself and the array returned by `wc_results()` still u
 
 To make behavior deterministic:
 
-- `wc_open_ex` performs a **pre-flight size check** in static-buffer mode:
-  - It computes a lower bound for:
-    - Hash table
-    - First arena block
-    - Optional heap-based scan buffer (if `WC_STACK_BUFFER == 0`)
-    - Alignment slack
-  - If this bound exceeds the effective budget (`min(static_size, max_bytes)`), `wc_open_ex` fails with `NULL`.
+- In static-buffer mode, `wc_open_ex` performs an initialization-time **dry run** using a scratch allocator state:
+  - It uses the same internal allocator logic as at runtime to simulate allocating:
+    - The initial hash table
+    - The first arena block
+    - The optional heap/static scan buffer (if `WC_STACK_BUFFER == 0`)
+  - If any of those simulated allocations would fail under the effective budget (the minimum of `static_size` and `max_bytes` when both are set), `wc_open_ex` fails with `NULL` before creating the instance.
 
 ### Error Model
 
@@ -243,7 +242,7 @@ The helper `wc_errstr()` converts any result code into a human-readable, static 
 
 ## API Reference
 
-The API is defined in `library/wordcount.h`.
+The API is defined in `wordcount.h`.
 
 ### Types
 
@@ -270,7 +269,7 @@ Per-instance memory and sizing limits:
   - Counts:
     - Hash table (all growth)
     - Arena blocks
-    - Optional heap scan buffer (if `WC_STACK_BUFFER == 0`)
+    - Optional heap/static scan buffer (if `WC_STACK_BUFFER == 0`)
   - Does **not** count:
     - The `wc` struct itself
     - Arrays returned by `wc_results()`
@@ -285,8 +284,9 @@ Per-instance memory and sizing limits:
 - `static_buf`, `static_size`:
   - Optional caller-supplied region used for all **internal** allocations.
   - Enables static-buffer mode (see above).
-  - Must be suitably aligned for `void *`.
+  - Must be suitably aligned for `void *` (at least as strict as `void *`, `size_t`, and `unsigned long`).
   - Must not be shared with another `wc` instance.
+  - On platforms where `uintptr_t` is available, misaligned buffers are detected at runtime and cause `wc_open_ex` to fail.
 
 Always initialize with all fields zeroed (e.g., `memset(&lim, 0, sizeof lim)`).
 
@@ -360,7 +360,7 @@ Create a new word counter with explicit size and memory limits.
   - Optional pointer to a `wc_limits` struct (`NULL` = same behavior as `wc_open`).
 - Returns:
   - Non-NULL on success.
-  - `NULL` on allocation failure, or if supplied limits are impossible to satisfy (e.g., `static_size` too small to hold even minimal structures).
+  - `NULL` on allocation failure, or if supplied limits are impossible to satisfy (e.g., `static_size` too small to hold even minimal structures under the configured budget).
 
 ```c
 void wc_close(wc *w);
@@ -559,14 +559,14 @@ The following macros can be defined **before** including `wordcount.h` to tune b
 #### Allocator Overrides
 
 ```c
-#define WC_MALLOC(n) my_malloc(n)
-#define WC_FREE(p)   my_free(p)
+#define WC_MALLOC(n)     my_malloc(n)
+#define WC_FREE(p)       my_free(p)
 #define WC_REALLOC(p, n) my_realloc(p, n)
 ```
 
 - Used for:
   - The `wc` handle itself
-  - Dynamic-mode internal allocations (hash table, arena blocks, heap scan buffer)
+  - Dynamic-mode internal allocations (hash table, arena blocks, heap/static scan buffer)
   - Temporary arrays returned by `wc_results`
 
 #### Stack vs. Heap Scan Buffer
@@ -602,6 +602,8 @@ On tiny MCUs or small stacks, `WC_STACK_BUFFER = 0` is recommended.
 - `WC_MIN_BLOCK_SZ`:
   - Lower bound on first arena block size.
   - Lowering this may be useful on tiny static buffers, but reduces the number of words that can be stored.
+
+These constants are also exposed via `wc_build_info()` (`max_word`, `min_init_cap`, `min_block_sz`).
 
 #### Default Initial Sizing
 
@@ -661,18 +663,17 @@ lim.static_size = sizeof pool;
 
 wc *w = wc_open_ex(32, &lim);
 if (!w) {
-    /* pool too small even for minimal structures */
+    /* pool too small even for minimal structures under configured limits */
 }
 ```
 
 In static-buffer mode, `wc_open_ex` will:
 
-- Compute a conservative lower bound for:
+- Use a scratch allocator state to **simulate** the minimal internal allocations:
   - Hash table
   - First arena block
   - Scan buffer (if `WC_STACK_BUFFER == 0`)
-  - Alignment slack
-- Fail early (`NULL`) if the configuration cannot be satisfied.
+- Fail early (`NULL`) if the configuration cannot satisfy those allocations under the effective budget (`min(static_size, max_bytes)` when both are set).
 
 ---
 
@@ -692,7 +693,7 @@ make
 This builds:
 
 - `libwordcount_lib.a` – default configuration (stack scan buffer)
-- `libwordcount_lib_heap.a` – heap scan buffer (`WC_STACK_BUFFER=0`)
+- `libwordcount_lib_heap.a` – heap/static scan buffer (`WC_STACK_BUFFER=0`)
 - `libwordcount_lib_tiny.a` – tiny-profile config (reduced floors, small `WC_MAX_WORD`)
 - `wc` – CLI tool
 - `wc_test`, `wc_test_heap`, `wc_test_tiny` – test binaries
@@ -713,21 +714,21 @@ To embed in another project without CMake:
 
 ```bash
 cc -std=c99 -O2 -Wall -Wextra -Wpedantic \
-   library/wordcount.c your_program.c -o your_program
+   wordcount.c your_program.c -o your_program
 ```
 
 If you need the CLI:
 
 ```bash
 cc -std=c99 -O2 \
-   library/wordcount.c library/wc_main.c -o wc
+   wordcount.c wc_main.c -o wc
 ```
 
-For heap-based scan buffer:
+For heap/static-based scan buffer:
 
 ```bash
 cc -std=c99 -O2 -DWC_STACK_BUFFER=0 \
-   library/wordcount.c your_program.c -o your_program
+   wordcount.c your_program.c -o your_program
 ```
 
 ### Directory Layout
@@ -737,20 +738,20 @@ Relevant files:
 ```text
 .
 ├── CMakeLists.txt
-├── library/
-│   ├── wordcount.h        # Public API
-│   ├── wordcount.c        # Core implementation
-│   ├── wc_main.c          # CLI tool
-│   └── wc_test.c          # Test suite
-├── wordcount.c            # Standalone C11 benchmark (idiomatic mmap)
-└── wordcount_hyperopt.c   # Standalone C11 hyper-optimized benchmark
+├── README.md
+├── wordcount.h         # Public API
+├── wordcount.c         # Core implementation
+├── wc_main.c           # CLI tool
+├── wc_test.c           # Test suite
+├── mingw-w64.cmake     # Optional MinGW cross-compilation toolchain
+└── wordcount_hyperopt.c  # Optional C11 benchmark / hyper-optimized impl
 ```
 
 ---
 
 ## CLI Tool (`wc`)
 
-The `wc` executable in `library/wc_main.c` is a simple command-line interface built on top of the library.
+The `wc` executable in `wc_main.c` is a simple command-line interface built on top of the library.
 
 ### Usage
 
@@ -759,7 +760,7 @@ wc [file ...]
 ```
 
 - With no arguments:
-  - Reads from `stdin`.
+  - Reads from `stdin` (streaming, bounded memory).
 - With one or more filenames:
   - Processes each file in order.
   - Aggregates word counts across all files.
@@ -772,14 +773,22 @@ Examples:
 cat file.txt | ./wc
 ```
 
-### Memory-Mapped I/O
+### Memory-Mapped I/O and Streaming
 
-- On POSIX:
-  - Uses `open`, `fstat`, `mmap`, `madvise`, `close`.
-- On Windows:
-  - Uses `CreateFileA`, `CreateFileMappingA`, `MapViewOfFile`, `CloseHandle`.
+- For regular files:
+  - On POSIX:
+    - Uses `open`, `fstat`, `mmap`, `madvise`, `close`.
+  - On Windows:
+    - Uses UTF-16 APIs for correct Unicode handling:
+      - `GetCommandLineW`, `CommandLineToArgvW` to obtain a UTF-16 argv
+      - Conversion to UTF-8 for the library and back to UTF-16 for I/O
+    - Uses `CreateFileW`, `CreateFileMappingW`, `MapViewOfFile`, `CloseHandle`.
+  - Files too large for `size_t` (on 32-bit) are rejected with `EFBIG`.
 
-Files too large for `size_t` (on 32-bit) are rejected with `EFBIG`.
+- For stdin:
+  - Processed in **streaming chunks** (size `STDIN_CHUNK`).
+  - A small internal carry buffer tracks words that span chunk boundaries.
+  - Semantics are equivalent to a single `wc_scan` on the entire stdin stream, but host memory usage remains bounded.
 
 ### Environment-Based Limits
 
@@ -794,6 +803,7 @@ Semantics:
 - Parsed as an unsigned integer number of bytes.
 - If invalid, the CLI prints an error and exits.
 - If set, the CLI passes `max_bytes` via `wc_limits` to `wc_open_ex`.
+- The limit caps **internal** library allocations (hash table, arena, scan buffer), not the file mapping itself.
 
 ### Output Format
 
@@ -867,13 +877,13 @@ Separate test binaries exercise:
 
 ### OOM Injection (glibc-specific)
 
-When built with `-DWC_TEST_OOM`, `wc_test.c` interposes `malloc` and `realloc` using glibc’s internal `__libc_malloc` / `__libc_realloc` symbols to simulate allocation failures at specific call counts.
+When built with `-DWC_TEST_OOM` on **glibc-based** systems, `wc_test.c` interposes `malloc` and `realloc` using glibc’s internal `__libc_malloc` / `__libc_realloc` symbols to simulate allocation failures at specific call counts.
 
-Build:
+Build (glibc only):
 
 ```bash
 cc -std=c99 -O0 -g -DWC_TEST_OOM \
-   library/wordcount.c library/wc_test.c -o wc_test_oom
+   wordcount.c wc_test.c -o wc_test_oom
 ./wc_test_oom
 ```
 
@@ -884,7 +894,7 @@ OOM tests exercise:
 - Failures during hash table growth
 - A “torture” mode that iterates many failure points in sequence
 
-On non-glibc platforms, the OOM harness is stubbed out and these tests are skipped. For portable OOM testing, compile `wordcount.c` with custom allocator macros and provide your own interposition.
+On non-glibc platforms, or when `WC_TEST_OOM` is not defined, the OOM harness is stubbed out and these tests are skipped. For portable OOM testing, compile `wordcount.c` with custom allocator macros and provide your own interposition.
 
 ### Fuzzing and Sanitizers
 
@@ -932,10 +942,10 @@ If these are not true (e.g., on EBCDIC), the build will fail via a compile-time 
 
 ### Integer and Pointer Assumptions
 
-Compile-time checks also require:
+The implementation assumes a conventional hosted C environment:
 
-- `sizeof(void*)` is a power of two (for alignment math).
-- Overflow-safe arithmetic is used for all size calculations before allocation.
+- The internal alignment union used by the bump allocator (`void *`, `size_t`, `unsigned long`) is sufficient to satisfy alignment requirements for all internal allocations.
+- All size calculations are explicitly overflow-checked before any allocation request.
 
 The implementation is portable across:
 
@@ -1116,7 +1126,7 @@ When modifying or extending the library:
    - Add unit tests for any new behavior.
    - Run all configurations:
      - `wc_test` (default)
-     - `wc_test_heap` (heap scan buffer)
+     - `wc_test_heap` (heap/static scan buffer)
      - `wc_test_tiny` (tiny profile)
      - `wc_test_oom` where applicable
    - If you introduce new behavior relevant to adversarial inputs, consider adding fuzz targets and documenting their use.
