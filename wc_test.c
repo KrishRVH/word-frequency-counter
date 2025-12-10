@@ -8,7 +8,8 @@
 **   Comprehensive test coverage including:
 **   - Happy path functionality
 **   - Edge cases and boundary conditions
-**   - OOM injection at many allocation points (SQLite-style torture test)
+**   - OOM injection at many allocation points (SQLite-style torture
+**     test)
 **   - Regression tests for known bugs
 **   - Memory limit tuning via wc_limits / wc_open_ex
 **
@@ -26,8 +27,8 @@
 **
 **   The default OOM build interposes malloc/realloc using glibc-specific
 **   __libc_malloc/__libc_realloc symbols. This is non-portable and
-**   technically undefined behavior per strict C99, but is exactly
-**   the pattern SQLite and other robust C libraries use in their
+**   technically undefined behavior per strict C99, but is exactly the
+**   pattern SQLite and other robust C libraries use in their
 **   development test harnesses.
 **
 **   For portable OOM testing, compile wordcount.c with:
@@ -71,6 +72,25 @@ static int g_run, g_pass, g_fail;
             return 1; \
         }             \
     } while (0)
+
+/*
+** Helper macro to define a statically-aligned buffer suitable for
+** use as wc_limits.static_buf.
+**
+** The union ensures alignment that is at least as strict as that of
+** void*, size_t, and unsigned long, matching the internal allocator’s
+** requirements. The 'buf' member starts at offset 0, so its address
+** is properly aligned for all internal types, even on strictly
+** conforming C implementations with no stronger guarantees for
+** unsigned char arrays.
+*/
+#define WC_TEST_STATIC_BUF(name, size_)                                   \
+    union {                                                               \
+        void         *p;                                                  \
+        size_t        sz;                                                 \
+        unsigned long ul;                                                 \
+        unsigned char buf[(size_)];                                       \
+    } name
 
 /* --- OOM injection framework (glibc-specific) -------------------------- */
 
@@ -255,13 +275,13 @@ static int test_open_ex_tiny_budget_fail(void)
 static int test_open_ex_tiny_static_fail(void)
 {
     wc_limits lim;
-    unsigned char buf[32];
+    WC_TEST_STATIC_BUF(pool, 32);
 
     TEST("open_ex tiny static_buf fails");
 
     memset(&lim, 0, sizeof lim);
-    lim.static_buf = buf;
-    lim.static_size = sizeof buf;
+    lim.static_buf = pool.buf;
+    lim.static_size = sizeof pool.buf;
 
     ASSERT(wc_open_ex(0, &lim) == NULL);
 
@@ -272,7 +292,7 @@ static int test_open_ex_tiny_static_fail(void)
 static int test_static_limits_enforced(void)
 {
     wc_limits lim;
-    unsigned char buf[4096];
+    WC_TEST_STATIC_BUF(pool, 4096);
     wc *w;
     size_t i;
     char word[32];
@@ -283,8 +303,8 @@ static int test_static_limits_enforced(void)
     TEST("static_buf enforces capacity");
 
     memset(&lim, 0, sizeof lim);
-    lim.static_buf = buf;
-    lim.static_size = sizeof buf;
+    lim.static_buf = pool.buf;
+    lim.static_size = sizeof pool.buf;
 
     w = wc_open_ex(0, &lim);
     ASSERT(w != NULL);
@@ -296,18 +316,20 @@ static int test_static_limits_enforced(void)
         ASSERT(rc == WC_OK || rc == WC_NOMEM);
     }
 
-    /* We should have stored at least some words before hitting WC_NOMEM. */
+    /* We should have stored at least some words before hitting
+     * WC_NOMEM. */
     ASSERT(wc_unique(w) > 0);
 
-    /* After filling, scanning more text should either work or fail with
-     * WC_NOMEM. */
+    /* After filling, scanning more text should either work or fail
+     * with WC_NOMEM. */
     {
         const char *t = "alpha beta gamma delta epsilon";
         int rc2 = wc_scan(w, t, strlen(t));
         ASSERT(rc2 == WC_OK || rc2 == WC_NOMEM);
     }
 
-    /* Results must still be well-formed even after a WC_NOMEM on insert. */
+    /* Results must still be well-formed even after a WC_NOMEM on
+     * insert. */
     ASSERT(wc_results(w, &r, &n) == WC_OK);
     ASSERT(n == wc_unique(w));
     wc_results_free(r);
@@ -320,13 +342,13 @@ static int test_static_limits_enforced(void)
 static int test_static_with_tiny_max_bytes_fails(void)
 {
     wc_limits lim;
-    unsigned char buf[4096];
+    WC_TEST_STATIC_BUF(pool, 4096);
 
     TEST("static_buf + tiny max_bytes fails");
 
     memset(&lim, 0, sizeof lim);
-    lim.static_buf = buf;
-    lim.static_size = sizeof buf;
+    lim.static_buf = pool.buf;
+    lim.static_size = sizeof pool.buf;
     lim.max_bytes = 1; /* far too small for internal structures */
 
     ASSERT(wc_open_ex(0, &lim) == NULL);
@@ -366,16 +388,16 @@ static int test_limits_budget_enforced(void)
 static int test_static_minimum_size_boundary(void)
 {
     wc_limits lim;
-    unsigned char buf[4096];
+    WC_TEST_STATIC_BUF(pool, 4096);
     size_t sz;
 
     TEST("static_buf minimum size boundary");
 
     memset(&lim, 0, sizeof lim);
-    lim.static_buf = buf;
+    lim.static_buf = pool.buf;
 
     /* Find smallest static_size that allows wc_open_ex() to succeed. */
-    for (sz = 1; sz <= sizeof buf; sz++) {
+    for (sz = 1; sz <= sizeof pool.buf; sz++) {
         wc *w;
 
         lim.static_size = sz;
@@ -387,7 +409,7 @@ static int test_static_minimum_size_boundary(void)
     }
 
     /* Library must be usable with some static size ≤ 4096. */
-    ASSERT(sz <= sizeof buf);
+    ASSERT(sz <= sizeof pool.buf);
 
     /* One byte smaller must fail (monotonic boundary). */
     if (sz > 1) {
@@ -742,7 +764,7 @@ static int test_results_free_null(void)
 }
 
 /* ================================================================
-** QUERY TESTS
+** QUERY / METADATA TESTS
 ** ================================================================ */
 
 static int test_query_null(void)
@@ -777,6 +799,29 @@ static int test_errstr(void)
     ASSERT(s && strlen(s) > 0);
     s = wc_errstr(9999);
     ASSERT(s && strlen(s) > 0);
+    PASS();
+    return 0;
+}
+
+static int test_build_info(void)
+{
+    const wc_build_config *cfg;
+
+    TEST("build_info");
+
+    cfg = wc_build_info();
+    ASSERT(cfg != NULL);
+
+    /* Version numbers must agree with compile-time macros. */
+    ASSERT(cfg->version_number == WC_VERSION_NUMBER);
+
+    /* Configuration macros must match build-time settings. */
+    ASSERT(cfg->max_word == WC_MAX_WORD);
+    ASSERT(cfg->min_init_cap == WC_MIN_INIT_CAP);
+    ASSERT(cfg->min_block_sz == WC_MIN_BLOCK_SZ);
+    ASSERT((cfg->stack_buffer != 0) ==
+           (WC_STACK_BUFFER != 0));
+
     PASS();
     return 0;
 }
@@ -1040,6 +1085,7 @@ int main(void)
     test_static_minimum_size_boundary();
     test_static_limits_enforced();
     test_static_with_tiny_max_bytes_fails();
+    test_max_word_clamped_to_wc_max_word();
 
     printf("\nwc_add:\n");
     test_add_single();
@@ -1047,7 +1093,6 @@ int main(void)
     test_add_multi();
     test_add_empty();
     test_add_null();
-    test_max_word_clamped_to_wc_max_word();
     test_add_trunc();
     test_add_trunc_collision();
 
@@ -1074,6 +1119,7 @@ int main(void)
     test_query_null();
     test_version();
     test_errstr();
+    test_build_info();
 
     printf("\nStress:\n");
     test_many_unique();
