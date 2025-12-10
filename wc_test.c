@@ -8,17 +8,23 @@
 **   Comprehensive test coverage including:
 **   - Happy path functionality
 **   - Edge cases and boundary conditions
-**   - OOM injection at every allocation point (SQLite-style torture test)
+**   - OOM injection at many allocation points (SQLite-style torture test)
 **   - Regression tests for known bugs
 **   - Memory limit tuning via wc_limits / wc_open_ex
 **
 ** Build:
 **   cc -O0 -g wordcount.c wc_test.c -o wc_test
-**   cc -O0 -g -DWC_TEST_OOM wordcount.c wc_test.c -o wc_test_oom
+**
+**   On glibc-based systems only:
+**     cc -O0 -g -DWC_TEST_OOM wordcount.c wc_test.c -o wc_test_oom
+**
+**   On non-glibc libcs, defining WC_TEST_OOM has no effect on the
+**   default harness; OOM tests are automatically skipped. For portable
+**   OOM testing, use WC_MALLOC/WC_FREE overrides as described below.
 **
 ** OOM HARNESS PORTABILITY NOTE
 **
-**   The OOM build interposes malloc/realloc using glibc-specific
+**   The default OOM build interposes malloc/realloc using glibc-specific
 **   __libc_malloc/__libc_realloc symbols. This is non-portable and
 **   technically undefined behavior per strict C99, but is exactly
 **   the pattern SQLite and other robust C libraries use in their
@@ -29,7 +35,9 @@
 **   and implement interposition in your test wrapper.
 */
 #ifndef WC_NO_TEST_MAIN
+
 #include "wordcount.h"
+
 #include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -64,9 +72,9 @@ static int g_run, g_pass, g_fail;
         }             \
     } while (0)
 
-/* --- OOM injection framework (glibc-specific) --- */
+/* --- OOM injection framework (glibc-specific) -------------------------- */
 
-#ifdef WC_TEST_OOM
+#if defined(WC_TEST_OOM) && defined(__GLIBC__)
 
 static int oom_target = 0;
 static int oom_count = 0;
@@ -131,7 +139,7 @@ void *realloc(void *ptr, size_t n)
     return __libc_realloc(ptr, n);
 }
 
-#else
+#else /* !(WC_TEST_OOM && __GLIBC__) */
 
 #if defined(__GNUC__) || defined(__clang__)
 #define OOM_UNUSED __attribute__((unused))
@@ -139,16 +147,11 @@ void *realloc(void *ptr, size_t n)
 #define OOM_UNUSED
 #endif
 
-OOM_UNUSED static void oom_reset(void)
-{
-    /* Stub for non-OOM builds */
-}
+/* Stubbed-out OOM harness for non-OOM builds or non-glibc libcs. */
+OOM_UNUSED static void oom_reset(void) {}
+OOM_UNUSED static void oom_arm(int n) { (void)n; }
 
-OOM_UNUSED static void oom_arm(int n)
-{
-    (void)n;
-}
-#endif
+#endif /* WC_TEST_OOM && __GLIBC__ */
 
 /* ================================================================
 ** LIFECYCLE / LIMITS TESTS
@@ -298,9 +301,11 @@ static int test_static_limits_enforced(void)
 
     /* After filling, scanning more text should either work or fail with
      * WC_NOMEM. */
-    const char *t = "alpha beta gamma delta epsilon";
-    int rc2 = wc_scan(w, t, strlen(t));
-    ASSERT(rc2 == WC_OK || rc2 == WC_NOMEM);
+    {
+        const char *t = "alpha beta gamma delta epsilon";
+        int rc2 = wc_scan(w, t, strlen(t));
+        ASSERT(rc2 == WC_OK || rc2 == WC_NOMEM);
+    }
 
     /* Results must still be well-formed even after a WC_NOMEM on insert. */
     ASSERT(wc_results(w, &r, &n) == WC_OK);
@@ -329,6 +334,7 @@ static int test_static_with_tiny_max_bytes_fails(void)
     PASS();
     return 0;
 }
+
 static int test_limits_budget_enforced(void)
 {
     wc_limits lim;
@@ -620,7 +626,8 @@ static int test_scan_trunc_collision(void)
     wc *w;
     wc_word *r;
     size_t n;
-    const char *t = "internationalization internationally international";
+    const char *t =
+            "internationalization internationally international";
     TEST("scan truncation collision");
     w = wc_open(8);
     ASSERT(wc_scan(w, t, strlen(t)) == WC_OK);
@@ -657,15 +664,19 @@ static int test_results_sorted(void)
     wc *w;
     wc_word *r;
     size_t n;
-    const char *t = "apple banana apple cherry apple banana";
+    const char *t =
+            "apple banana apple cherry apple banana";
     TEST("results sorted");
     w = wc_open(0);
     ASSERT(wc_scan(w, t, strlen(t)) == WC_OK);
     ASSERT(wc_results(w, &r, &n) == WC_OK);
     ASSERT(n == 3);
-    ASSERT(strcmp(r[0].word, "apple") == 0 && r[0].count == 3);
-    ASSERT(strcmp(r[1].word, "banana") == 0 && r[1].count == 2);
-    ASSERT(strcmp(r[2].word, "cherry") == 0 && r[2].count == 1);
+    ASSERT(strcmp(r[0].word, "apple") == 0 &&
+           r[0].count == 3);
+    ASSERT(strcmp(r[1].word, "banana") == 0 &&
+           r[1].count == 2);
+    ASSERT(strcmp(r[2].word, "cherry") == 0 &&
+           r[2].count == 1);
     wc_results_free(r);
     wc_close(w);
     PASS();
@@ -864,7 +875,7 @@ static int test_arena_blocks(void)
 ** OOM INJECTION TESTS (SQLite-style torture testing)
 ** ================================================================ */
 
-#ifdef WC_TEST_OOM
+#if defined(WC_TEST_OOM) && defined(__GLIBC__)
 
 static int test_oom_open(void)
 {
@@ -906,7 +917,8 @@ static int test_oom_add(void)
 static int test_oom_scan(void)
 {
     wc *w;
-    const char *t = "the quick brown fox jumps over the lazy dog";
+    const char *t =
+            "the quick brown fox jumps over the lazy dog";
     int i, rc;
     TEST("OOM in wc_scan");
     for (i = 1; i <= 30; i++) {
@@ -955,7 +967,7 @@ static int test_oom_growth(void)
     TEST("OOM during table growth");
     w = wc_open(0);
     for (i = 0; i < 5000; i++) {
-        snprintf(word, sizeof word, "word%zu", i);
+        (void)snprintf(word, sizeof word, "word%zu", i);
         if (i == 3000)
             oom_arm(5);
         rc = wc_add(w, word);
@@ -972,7 +984,8 @@ static int test_oom_growth(void)
 
 static int test_oom_torture(void)
 {
-    const char *text = "alpha beta gamma delta epsilon alpha beta gamma";
+    const char *text =
+            "alpha beta gamma delta epsilon alpha beta gamma";
     int i, max_allocs = 50;
     TEST("OOM torture (all injection points)");
     for (i = 1; i <= max_allocs; i++) {
@@ -1006,7 +1019,7 @@ static int test_oom_torture(void)
     return 0;
 }
 
-#endif /* WC_TEST_OOM */
+#endif /* WC_TEST_OOM && __GLIBC__ */
 
 /* ================================================================
 ** MAIN
@@ -1068,7 +1081,7 @@ int main(void)
     test_growth();
     test_arena_blocks();
 
-#ifdef WC_TEST_OOM
+#if defined(WC_TEST_OOM) && defined(__GLIBC__)
     printf("\nOOM Injection (glibc-specific):\n");
     test_oom_open();
     test_oom_add();
@@ -1087,4 +1100,5 @@ int main(void)
 
     return g_fail ? 1 : 0;
 }
-#endif
+
+#endif /* WC_NO_TEST_MAIN */

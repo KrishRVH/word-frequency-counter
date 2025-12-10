@@ -42,6 +42,23 @@ WC_STATIC_ASSERT('A' == 65 && 'Z' == 90 && 'a' == 97 && 'z' == 122 &&
 
 WC_STATIC_ASSERT(CHAR_BIT == 8, char_bit_must_be_8);
 
+/* Configuration sanity checks (see wordcount.h for defaults). */
+
+WC_STATIC_ASSERT(WC_MAX_WORD >= 4u,
+                 wc_max_word_must_be_at_least_4);
+
+WC_STATIC_ASSERT(WC_MIN_INIT_CAP >= 1u,
+                 wc_min_init_cap_must_be_positive);
+
+WC_STATIC_ASSERT(WC_MIN_BLOCK_SZ >= 1u,
+                 wc_min_block_sz_must_be_positive);
+
+WC_STATIC_ASSERT(WC_DEFAULT_INIT_CAP >= WC_MIN_INIT_CAP,
+                 wc_default_init_cap_too_small);
+
+WC_STATIC_ASSERT(WC_DEFAULT_BLOCK_SZ >= WC_MIN_BLOCK_SZ,
+                 wc_default_block_sz_too_small);
+
 /*
 ** Internal alignment type.
 **
@@ -69,34 +86,14 @@ static void wc_internal_align_sanity(void)
     (void)sizeof(((wc_internal_align *)0)->ul);
 }
 
-/* --- Configuration defaults (platform-tuned) --------------------------- */
+/* --- Configuration defaults (implementation-local) --------------------- */
 
 /*
-** Maximum word length this build supports. The public API clamps
-** max_word into [MIN_WORD, WC_MAX_WORD]. WC_MAX_WORD may be lowered
-** at compile time for constrained targets as long as callers respect
-** the smaller cap.
+** Runtime max_word is clamped into [MIN_WORD, WC_MAX_WORD].
+** WC_MAX_WORD and the *_INIT_* / *_BLOCK_* macros come from the header.
 */
-#ifndef WC_MAX_WORD
-#define WC_MAX_WORD 1024u
-#endif
-
 #define MIN_WORD 4u
 #define DEF_WORD 64u
-
-/*
-** Minimum initial hash table capacity and arena block size. These
-** act as floors for tune_params(); they can be reduced at compile
-** time for constrained environments without affecting the public API
-** on default builds.
-*/
-#ifndef WC_MIN_INIT_CAP
-#define WC_MIN_INIT_CAP 16u
-#endif
-
-#ifndef WC_MIN_BLOCK_SZ
-#define WC_MIN_BLOCK_SZ 256u
-#endif
 
 /*
 ** Hash type and FNV-1a constants (32-bit).
@@ -145,41 +142,31 @@ typedef struct {
     size_t cnt;
 } Slot;
 
+/* --- Internal allocation state ---------------------------------------- */
+
+typedef struct {
+    /* Common to dynamic and static modes. */
+    size_t bytes_used;   /* sum of payload bytes allocated internally */
+    size_t bytes_limit;  /* upper bound on bytes_used when non-zero  */
+    int static_mode;     /* 0 = dynamic, 1 = static-buffer mode      */
+
+    /* Static-buffer mode only. */
+    unsigned char *sbuf;
+    size_t sbuf_size;
+    size_t sbuf_used;
+} wc_alloc_state;
+
 /* --- wc object --------------------------------------------------------- */
 
 struct wc {
     Slot *tab;
-    size_t cap;  /* hash table capacity (power of two) */
-    size_t len;  /* number of unique words */
-    size_t tot;  /* total words (including duplicates) */
-    size_t maxw; /* maximum stored word length */
+    size_t cap;   /* hash table capacity (power of two) */
+    size_t len;   /* number of unique words             */
+    size_t tot;   /* total words (including duplicates) */
+    size_t maxw;  /* maximum stored word length         */
 
     Arena arena;
-
-    /*
-    ** Allocation accounting.
-    **
-    ** bytes_used  - sum of payload bytes allocated internally for this
-    **               wc instance (hash table slots, arena word storage,
-    **               optional heap scan buffer when WC_STACK_BUFFER==0).
-    ** bytes_limit - upper bound on bytes_used when non-zero.
-    **
-    ** In static-buffer mode, bytes_limit, if provided, is clamped to
-    ** static_size and acts as an additional guard on top of sbuf_size.
-    */
-    size_t bytes_used;
-    size_t bytes_limit;
-
-    /*
-    ** Optional static buffer for all internal allocations (hash table,
-    ** arena blocks, optional heap scan buffer). When static_mode != 0,
-    ** wc_xmalloc carves from [sbuf, sbuf + sbuf_size) using a bump
-    ** allocator and wc_xfree is a no-op.
-    */
-    unsigned char *sbuf;
-    size_t sbuf_size;
-    size_t sbuf_used;
-    int static_mode; /* 0 = dynamic, 1 = static buffer */
+    wc_alloc_state alloc;
 
 #if !WC_STACK_BUFFER
     char *scanbuf;
@@ -188,6 +175,7 @@ struct wc {
 
 /* --- Internal helpers (forward declarations) --------------------------- */
 
+static void *wc_xmalloc_state(wc_alloc_state *st, size_t n);
 static void *wc_xmalloc(wc *w, size_t n);
 static void wc_xfree(wc *w, void *p, size_t n);
 
@@ -207,92 +195,97 @@ tune_params(const wc_limits *lim, size_t *init_cap, size_t *block_sz);
 /* --- Allocation helpers ------------------------------------------------ */
 
 /*
-** Central allocation helper. In dynamic mode this wraps WC_MALLOC and
-** enforces bytes_limit. In static-buffer mode it carves from sbuf via a
-** bump allocator with WC_ALIGN alignment and enforces both sbuf_size
-** and bytes_limit.
+** Central allocation helper on a raw state object.
 **
-** On any arithmetic overflow in counters or size calculations, this
-** function fails cleanly (returns NULL) rather than risking UB.
+** In dynamic mode this wraps WC_MALLOC and enforces bytes_limit.
+** In static-buffer mode it carves from sbuf via a bump allocator with
+** WC_ALIGN alignment and enforces both sbuf_size and bytes_limit.
+**
+** On any arithmetic overflow or limit violation, this function fails
+** cleanly (returns NULL) rather than risking UB.
 */
-static void *wc_xmalloc(wc *w, size_t n)
+static void *wc_xmalloc_state(wc_alloc_state *st, size_t n)
 {
     void *p;
 
-    if (!w || n == 0)
+    if (!st || n == 0)
         return NULL;
 
-    /* Dynamic mode: use WC_MALLOC / WC_FREE and bytes_limit. */
-    if (!w->static_mode) {
+    if (!st->static_mode) {
         size_t new_used;
 
-        if (add_overflows(w->bytes_used, n))
+        if (add_overflows(st->bytes_used, n))
             return NULL;
-        new_used = w->bytes_used + n;
 
-        if (w->bytes_limit && new_used > w->bytes_limit)
+        new_used = st->bytes_used + n;
+        if (st->bytes_limit && new_used > st->bytes_limit)
             return NULL;
 
         p = WC_MALLOC(n);
         if (!p)
             return NULL;
 
-        w->bytes_used = new_used;
+        st->bytes_used = new_used;
         return p;
     }
 
     /* Static-buffer mode: bump allocator within [sbuf, sbuf+sbuf_size). */
-    {
-        size_t align = WC_ALIGN;
-        size_t off;
-        size_t pad;
-        size_t need;
-        size_t new_used;
+{
+    size_t align = WC_ALIGN;
+    size_t off = st->sbuf_used;
+    size_t pad = (align - (off % align)) % align;
+    size_t new_used;
 
-        WC_ASSERT(w->sbuf != NULL);
+    if (add_overflows(pad, n))
+        return NULL;
+    if (add_overflows(st->sbuf_used, pad + n))
+        return NULL;
 
-        off = w->sbuf_used;
-        pad = (align - (off % align)) % align;
+    if (st->sbuf_used + pad + n > st->sbuf_size)
+        return NULL;
 
-        if (add_overflows(pad, n))
-            return NULL;
-        need = pad + n;
+    if (add_overflows(st->bytes_used, n))
+        return NULL;
+    new_used = st->bytes_used + n;
+    if (st->bytes_limit && new_used > st->bytes_limit)
+        return NULL;
 
-        if (add_overflows(w->sbuf_used, need))
-            return NULL;
-        if (w->sbuf_used + need > w->sbuf_size)
-            return NULL;
-
-        if (add_overflows(w->bytes_used, n))
-            return NULL;
-        new_used = w->bytes_used + n;
-
-        if (w->bytes_limit && new_used > w->bytes_limit)
-            return NULL;
-
-        p = (void *)(w->sbuf + w->sbuf_used + pad);
-        w->sbuf_used += need;
-        w->bytes_used = new_used;
-
-        return memset(p, 0, n);
-    }
+    p = (void *)(st->sbuf + st->sbuf_used + pad);
+    st->sbuf_used += pad + n;
+    st->bytes_used = new_used;
+    return memset(p, 0, n);
+}
 }
 
+/*
+** Convenience wrapper for the wc object.
+*/
+static void *wc_xmalloc(wc *w, size_t n)
+{
+    return w ? wc_xmalloc_state(&w->alloc, n) : NULL;
+}
+
+/*
+** Internal free helper.
+**
+** In dynamic mode it calls WC_FREE and decrements bytes_used.
+** In static-buffer mode it is a no-op; memory is never recycled
+** inside the static buffer.
+*/
 static void wc_xfree(wc *w, void *p, size_t n)
 {
-    if (!p || !w)
+    if (!w || !p)
         return;
 
-    if (!w->static_mode) {
+    if (!w->alloc.static_mode) {
         WC_FREE(p);
 
-        if (w->bytes_used >= n)
-            w->bytes_used -= n;
+        if (w->alloc.bytes_used >= n)
+            w->alloc.bytes_used -= n;
         else
-            w->bytes_used = 0;
+            w->alloc.bytes_used = 0;
     } else {
-        /* Static-buffer mode: memory is never reclaimed. */
-        (void)n;
+        (void)n; /* static-buffer mode: nothing to do */
     }
 }
 
@@ -356,9 +349,11 @@ static void arena_free(wc *w)
 }
 
 /*
-** Arena allocation with WC_ALIGN alignment. In static-buffer mode,
-** the arena never extends beyond the initial block; further requests
-** fail with NULL and are mapped to WC_NOMEM by callers.
+** Arena allocation with WC_ALIGN alignment.
+**
+** In static-buffer mode, the arena never extends beyond the initial
+** block; further requests fail with NULL and are mapped to WC_NOMEM
+** by callers.
 */
 static void *arena_alloc(wc *w, size_t sz)
 {
@@ -390,7 +385,7 @@ static void *arena_alloc(wc *w, size_t sz)
     }
 
     /* Static-buffer mode: arena is fixed to the first block. */
-    if (w->static_mode)
+    if (w->alloc.static_mode)
         return NULL;
 
     if (add_overflows(sz, align))
@@ -499,8 +494,10 @@ static Slot *tab_find(wc *w, const char *word, size_t n, wc_hash_t h)
         if (!s->word)
             return s;
 
-        if (s->hash == h && memcmp(s->word, word, n) == 0 && s->word[n] == '\0')
+        if (s->hash == h && memcmp(s->word, word, n) == 0 &&
+            s->word[n] == '\0') {
             return s;
+        }
 
         idx = (idx + 1) & (w->cap - 1);
     } while (idx != start);
@@ -525,7 +522,7 @@ static int tab_insert(wc *w, const char *word, size_t n, wc_hash_t h)
     ** as out-of-memory and the caller observes WC_NOMEM.
     */
     if (w->len * 10 >= w->cap * 7) {
-        if (w->static_mode)
+        if (w->alloc.static_mode)
             return -1;
         if (tab_grow(w) < 0)
             return -1;
@@ -659,31 +656,38 @@ wc *wc_open_ex(size_t max_word, const wc_limits *limits)
         return NULL;
     memset(w, 0, sizeof *w);
 
+    /* Initialize allocator state. */
+    w->alloc.bytes_used = 0;
+    w->alloc.bytes_limit = 0;
+    w->alloc.static_mode = 0;
+    w->alloc.sbuf = NULL;
+    w->alloc.sbuf_size = 0;
+    w->alloc.sbuf_used = 0;
+
     /* Configure static-buffer mode if requested. */
     if (limits && limits->static_buf && limits->static_size > 0) {
-        w->static_mode = 1;
-        w->sbuf = (unsigned char *)limits->static_buf;
-        w->sbuf_size = limits->static_size;
-        w->sbuf_used = 0;
+        w->alloc.static_mode = 1;
+        w->alloc.sbuf = (unsigned char *)limits->static_buf;
+        w->alloc.sbuf_size = limits->static_size;
+        w->alloc.sbuf_used = 0;
 
 #if defined(UINTPTR_MAX)
         /*
         ** If uintptr_t is available, enforce that static_buf is
         ** suitably aligned for our internal alignment requirement.
         ** Misaligned buffers are rejected deterministically.
+        **
+        ** On platforms without uintptr_t, we rely on the documented
+        ** requirement that the caller supply a suitably aligned buffer.
         */
-        if (((uintptr_t)limits->static_buf % WC_ALIGN) != 0) {
-#else
-        if (((size_t)limits->static_buf % WC_ALIGN) != 0) {
-#endif
-            WC_FREE(w);
-            return NULL;
+        {
+            uintptr_t p = (uintptr_t)limits->static_buf;
+            if (p % WC_ALIGN != 0u) {
+                WC_FREE(w);
+                return NULL;
+            }
         }
-    } else {
-        w->static_mode = 0;
-        w->sbuf = NULL;
-        w->sbuf_size = 0;
-        w->sbuf_used = 0;
+#endif
     }
 
     /*
@@ -695,16 +699,13 @@ wc *wc_open_ex(size_t max_word, const wc_limits *limits)
     if (limits && limits->max_bytes) {
         size_t b = limits->max_bytes;
 
-        if (w->static_mode && limits->static_size > 0 &&
-            b > limits->static_size)
+        if (w->alloc.static_mode && limits->static_size > 0 &&
+            b > limits->static_size) {
             b = limits->static_size;
+        }
 
-        w->bytes_limit = b;
-    } else {
-        w->bytes_limit = 0;
+        w->alloc.bytes_limit = b;
     }
-
-    w->bytes_used = 0;
 
     /* Clamp max_word into [MIN_WORD, WC_MAX_WORD]. */
     if (max_word == 0)
@@ -717,57 +718,33 @@ wc *wc_open_ex(size_t max_word, const wc_limits *limits)
 
     /*
     ** In static-buffer mode, verify that the minimal internal
-    ** structures (hash table, first arena block, optional scan
-    ** buffer when WC_STACK_BUFFER==0) can fit within the effective
-    ** budget. This keeps behavior deterministic on very small pools.
+    ** structures (hash table, first arena block, optional heap
+    ** scan buffer) can fit within the effective budget by simulating
+    ** the same allocation sequence with a scratch allocator state.
     */
-    if (w->static_mode) {
-        size_t need = 0;
-        size_t eff_budget;
+    if (w->alloc.static_mode) {
+        wc_alloc_state scratch = w->alloc;
         size_t arena_bytes;
 
         if (mul_overflows(init_cap, sizeof(Slot)))
             goto fail;
 
         table_bytes = init_cap * sizeof(Slot);
-        need = table_bytes;
+
+        if (!wc_xmalloc_state(&scratch, table_bytes))
+            goto fail;
 
         if (add_overflows(sizeof(Block), block_sz))
             goto fail;
         arena_bytes = sizeof(Block) + block_sz;
 
-        if (add_overflows(need, arena_bytes))
+        if (!wc_xmalloc_state(&scratch, arena_bytes))
             goto fail;
-        need += arena_bytes;
 
 #if !WC_STACK_BUFFER
-        if (add_overflows(need, w->maxw))
+        if (!wc_xmalloc_state(&scratch, w->maxw))
             goto fail;
-        need += w->maxw;
 #endif
-        /*
-        ** Account for worst-case alignment padding: we perform at
-        ** most three allocations (table, first block, scan buffer)
-        ** during initialization, each rounded up to WC_ALIGN.
-        */
-        {
-            size_t align_slack;
-
-            if (mul_overflows(3u, (size_t)(WC_ALIGN - 1u)))
-                goto fail;
-            align_slack = 3u * (size_t)(WC_ALIGN - 1u);
-
-            if (add_overflows(need, align_slack))
-                goto fail;
-            need += align_slack;
-        }
-
-        eff_budget = w->sbuf_size;
-        if (w->bytes_limit && w->bytes_limit < eff_budget)
-            eff_budget = w->bytes_limit;
-
-        if (need > eff_budget)
-            goto fail;
     }
 
     /* Allocate initial hash table. */
@@ -791,7 +768,7 @@ wc *wc_open_ex(size_t max_word, const wc_limits *limits)
     }
 
 #if !WC_STACK_BUFFER
-    /* Optional heap-based scan buffer. */
+    /* Optional heap/static-based scan buffer. */
     w->scanbuf = (char *)wc_xmalloc(w, w->maxw);
     if (!w->scanbuf) {
         arena_free(w);
