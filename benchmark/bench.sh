@@ -1,8 +1,9 @@
 #!/bin/bash
 
 # ==============================================================================
-# 🚀 THE FOUR HORSEMEN: WORDCOUNT PERFORMANCE SHOWDOWN v3.2
-#    Self-contained: Generates all missing source code automatically.
+# 🚀 THE FOUR HORSEMEN: WORDCOUNT PERFORMANCE SHOWDOWN v3.3
+#    - Fixed: wc.c compilation (added _GNU_SOURCE)
+#    - Added: Compiler error logging
 # ==============================================================================
 
 # --- Ensure we run inside the benchmark directory ---
@@ -36,7 +37,7 @@ CROSS="${RED}✘${NC}"
 # ==============================================================================
 clear
 echo -e "${BOLD}╔══════════════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${BOLD}║               ULTIMATE WORDCOUNT BENCHMARK SUITE v3.2                ║${NC}"
+echo -e "${BOLD}║               ULTIMATE WORDCOUNT BENCHMARK SUITE v3.3                ║${NC}"
 echo -e "${BOLD}╚══════════════════════════════════════════════════════════════════════╝${NC}"
 
 if [[ ! -f "$LIB_SRC" || ! -f "$LIB_MAIN" ]]; then
@@ -57,9 +58,11 @@ echo ""
 # ==============================================================================
 echo -e "${BOLD}>> Stage 1: Fabricating Contenders${NC}"
 
-# --- 1. Legacy (wc.c) - The "Original" Hacker Script (Generated since missing) ---
+# --- 1. Legacy (wc.c) ---
+# Added _GNU_SOURCE to fix -std=c11 compilation errors (mmap/stat/open visibility)
 cat << 'EOF' > wc.c
-/* wc.c - Legacy Single-Threaded Implementation (DJB2 Hash + Linked List) */
+/* wc.c - Legacy Single-Threaded Implementation */
+#define _GNU_SOURCE
 #include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -68,44 +71,93 @@ cat << 'EOF' > wc.c
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
-typedef struct E E; struct E { E *next; size_t cnt, h; char w[]; };
-static struct { E **tab; size_t cap, n, tot; char *mem; size_t len; int fd; } G;
-static void die(const char *s) { fprintf(stderr, "wc: %s\n", s); exit(1); }
+
+typedef struct E E;
+struct E {
+    E *next;
+    size_t cnt, h;
+    char w[];
+};
+
+static struct {
+    E **tab;
+    size_t cap, n, tot;
+    char *mem;
+    size_t len;
+    int fd;
+} G;
+
+static void die(const char *s) { (void)fprintf(stderr, "wc: %s\n", s); exit(1); }
 static inline int alpha(unsigned c) { return (c | 32) - 'a' < 26; }
+
 static void grow(void) {
-    size_t newcap = G.cap ? G.cap * 2 : 4096; E **newtab = calloc(newcap, sizeof(E *));
-    for (size_t i = 0; i < G.cap; i++) { E *e = G.tab[i]; while (e) { E *next = e->next; size_t idx = e->h & (newcap - 1); e->next = newtab[idx]; newtab[idx] = e; e = next; } }
+    size_t newcap = G.cap ? G.cap * 2 : 4096;
+    E **newtab = calloc(newcap, sizeof(E *));
+    if (!newtab) die("out of memory");
+    for (size_t i = 0; i < G.cap; i++) {
+        E *e = G.tab[i];
+        while (e) {
+            E *next = e->next;
+            size_t idx = e->h & (newcap - 1);
+            e->next = newtab[idx]; newtab[idx] = e; e = next;
+        }
+    }
     free(G.tab); G.tab = newtab; G.cap = newcap;
 }
+
 static void add(const char *w, size_t len, size_t h) {
     if (G.n >= G.cap * 7 / 10) grow();
     size_t idx = h & (G.cap - 1);
-    for (E *e = G.tab[idx]; e; e = e->next) { if (e->h == h && !memcmp(e->w, w, len) && !e->w[len]) { e->cnt++; G.tot++; return; } }
+    for (E *e = G.tab[idx]; e; e = e->next) {
+        if (e->h == h && !memcmp(e->w, w, len) && !e->w[len]) { e->cnt++; G.tot++; return; }
+    }
     E *e = malloc(sizeof(E) + len + 1);
-    memcpy(e->w, w, len); e->w[len] = '\0'; e->h = h; e->cnt = 1; e->next = G.tab[idx]; G.tab[idx] = e; G.n++; G.tot++;
+    if (!e) die("out of memory");
+    memcpy(e->w, w, len); e->w[len] = '\0'; e->h = h; e->cnt = 1;
+    e->next = G.tab[idx]; G.tab[idx] = e; G.n++; G.tot++;
 }
+
 static void scan(void) {
-    const unsigned char *s = (const unsigned char *)G.mem, *end = s + G.len; char buf[256];
+    const unsigned char *s = (const unsigned char *)G.mem;
+    const unsigned char *end = s + G.len;
+    char buf[256];
     while (s < end) {
         while (s < end && !alpha(*s)) s++;
         if (s >= end) break;
-        size_t h = 5381u, n = 0;
-        while (s < end && alpha(*s)) { unsigned c = *s++ | 32; if (n < 255) buf[n++] = c; h = ((h << 5) + h) + c; }
+        size_t h = 5381u; size_t n = 0;
+        while (s < end && alpha(*s)) {
+            unsigned c = *s++ | 32;
+            if (n < sizeof(buf) - 1) buf[n++] = c;
+            h = ((h << 5) + h) + c;
+        }
         add(buf, n, h);
     }
 }
+
+static int cmp(const void *a, const void *b) {
+    const E *x = *(const E **)a; const E *y = *(const E **)b;
+    if (x->cnt != y->cnt) return x->cnt < y->cnt ? 1 : -1;
+    return strcmp(x->w, y->w);
+}
+
 int main(int argc, char **argv) {
     if (argc != 2) return 1;
-    G.fd = open(argv[1], O_RDONLY); struct stat st; fstat(G.fd, &st); G.len = st.st_size;
-    G.mem = mmap(NULL, G.len, PROT_READ, MAP_PRIVATE, G.fd, 0); madvise(G.mem, G.len, MADV_SEQUENTIAL);
-    scan(); munmap(G.mem, G.len); close(G.fd); return 0;
+    G.fd = open(argv[1], O_RDONLY);
+    struct stat st; fstat(G.fd, &st); G.len = st.st_size;
+    G.mem = mmap(NULL, G.len, PROT_READ, MAP_PRIVATE, G.fd, 0);
+    madvise(G.mem, G.len, MADV_SEQUENTIAL);
+    scan();
+    // Output simplified for benchmark (count only)
+    fprintf(stderr, "Total: %zu Unique: %zu\n", G.tot, G.n);
+    munmap(G.mem, G.len); close(G.fd);
+    return 0;
 }
 EOF
 echo -e "   $CHECK wc.c (Legacy v0) generated"
 
-# --- 2. Parallel System (wc2.c) - The "Balanced" Implementation ---
+# --- 2. Parallel System (wc2.c) ---
 cat << 'EOF' > wc2.c
-/* wc2.c - Parallel Systems Implementation (FNV-1a + MapReduce) */
+/* wc2.c - Parallel Systems Implementation */
 #define _GNU_SOURCE
 #include <ctype.h>
 #include <fcntl.h>
@@ -197,7 +249,7 @@ int main(int argc, char **argv) {
 EOF
 echo -e "   $CHECK wc2.c (Parallel v2) generated"
 
-# --- 3. AI Optimized (wcai.c) - The "Swiss/FxHash" Monster ---
+# --- 3. AI Optimized (wcai.c) ---
 cat << 'EOF' > wcai.c
 /* wcai.c - Map-Reduce High-Performance Counter (Swiss+FxHash) */
 #define _GNU_SOURCE
@@ -336,10 +388,17 @@ echo -e "${BOLD}>> Stage 3: Compilation (-O3 -march=native)${NC}"
 compile() {
     local cmd=$1
     local name=$2
-    $cmd 2>/dev/null
-    if [ $? -eq 0 ]; then echo -e "   $CHECK $name"; else echo -e "   $CROSS $name Failed"; exit 1; fi
+    if $cmd 2> /tmp/build_err.log; then
+        echo -e "   $CHECK $name"
+    else
+        echo -e "   $CROSS $name Failed"
+        echo "   Compiler Output:"
+        cat /tmp/build_err.log
+        exit 1
+    fi
 }
 
+# wc.c needs _GNU_SOURCE for mmap/madvise, handled in file content now.
 compile "gcc -O3 -std=c11 -o bin_legacy wc.c" "Legacy (v0)"
 compile "gcc -O3 -std=c99 -DWC_OMIT_ASSERT -I$SRC_ROOT -o bin_lib $LIB_SRC $LIB_MAIN" "Library (vF)"
 compile "gcc -O3 -pthread -march=native -o bin_par wc2.c -lpthread" "Parallel (v2)"
@@ -363,7 +422,6 @@ run_bench() {
         /usr/bin/time -f "%e" -o "$tmp" ./$bin "$FINAL_CORPUS" >/dev/null 2>&1
         local res=$(cat "$tmp")
         if [ -z "$res" ]; then res="FAIL"; fi
-        # Append to array
         eval "$arr_name+=($res)"
         printf "${BLUE}▪${NC}"
     done
@@ -380,7 +438,7 @@ run_bench "bin_ai"     "AI Optimized" "T_AI"
 # ==============================================================================
 echo -e "\n${BOLD}>> Stage 5: The Stats${NC}"
 
-# Helper to calculate stats safely
+# Math Helpers
 get_mean() {
     local arr=("${!1}")
     echo "${arr[@]}" | awk '{sum=0; cnt=0; for(i=1;i<=NF;i++) if($i!="FAIL"){sum+=$i; cnt++} if(cnt==0) print "0"; else printf "%.4f", sum/cnt}'
