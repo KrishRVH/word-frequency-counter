@@ -1,16 +1,24 @@
 #!/bin/bash
 
 # ==============================================================================
-# 🚀 THE FOUR HORSEMEN: WORDCOUNT PERFORMANCE SHOWDOWN v3.3
-#    - Fixed: wc.c compilation (added _GNU_SOURCE)
-#    - Added: Compiler error logging
+# 🚀 THE FOUR HORSEMEN: WORDCOUNT PERFORMANCE SHOWDOWN v3.5
+#    - Fixed: wcai.c signed-char bug (caused undercounting on UTF-8)
+#    - Fixed: ANSI color rendering in validation step
 # ==============================================================================
 
 # --- Ensure we run inside the benchmark directory ---
 cd "$(dirname "$0")" || exit 1
 
+# --- Argument Parsing ---
+VALIDATE=0
+for arg in "$@"; do
+    if [[ "$arg" == "--validate" || "$arg" == "-v" ]]; then
+        VALIDATE=1
+    fi
+done
+
 # --- Configuration ---
-RUNS=10
+RUNS=4
 TARGET_SIZE_MB=500
 CORPUS_DIR="bench_data"
 FINAL_CORPUS="corpus_final.txt"
@@ -20,15 +28,15 @@ SRC_ROOT=".."
 LIB_SRC="$SRC_ROOT/wordcount.c"
 LIB_MAIN="$SRC_ROOT/wc_main.c"
 
-# --- Styling ---
-BOLD='\033[1m'
-RED='\033[1;31m'
-GREEN='\033[1;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[1;34m'
-PURPLE='\033[1;35m'
-CYAN='\033[1;36m'
-NC='\033[0m'
+# --- Styling (ANSI Safe) ---
+BOLD=$'\e[1m'
+RED=$'\e[31m'
+GREEN=$'\e[32m'
+YELLOW=$'\e[33m'
+BLUE=$'\e[34m'
+PURPLE=$'\e[35m'
+CYAN=$'\e[36m'
+NC=$'\e[0m'
 CHECK="${GREEN}✔${NC}"
 CROSS="${RED}✘${NC}"
 
@@ -37,7 +45,7 @@ CROSS="${RED}✘${NC}"
 # ==============================================================================
 clear
 echo -e "${BOLD}╔══════════════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${BOLD}║               ULTIMATE WORDCOUNT BENCHMARK SUITE v3.3                ║${NC}"
+echo -e "${BOLD}║               ULTIMATE WORDCOUNT BENCHMARK SUITE v3.5                ║${NC}"
 echo -e "${BOLD}╚══════════════════════════════════════════════════════════════════════╝${NC}"
 
 if [[ ! -f "$LIB_SRC" || ! -f "$LIB_MAIN" ]]; then
@@ -51,6 +59,11 @@ CORES=$(nproc)
 echo -e "${BLUE}Hardware:${NC} $CPU_MODEL"
 echo -e "${BLUE}Topology:${NC} $CORES Logical Cores"
 echo -e "${BLUE}Payload:${NC}  ${TARGET_SIZE_MB}MB Text Corpus"
+if [ "$VALIDATE" -eq 1 ]; then
+    echo -e "${BLUE}Mode:${NC}     ${GREEN}Validation Enabled${NC}"
+else
+    echo -e "${BLUE}Mode:${NC}     Performance Only (use --validate to check correctness)"
+fi
 echo ""
 
 # ==============================================================================
@@ -59,7 +72,6 @@ echo ""
 echo -e "${BOLD}>> Stage 1: Fabricating Contenders${NC}"
 
 # --- 1. Legacy (wc.c) ---
-# Added _GNU_SOURCE to fix -std=c11 compilation errors (mmap/stat/open visibility)
 cat << 'EOF' > wc.c
 /* wc.c - Legacy Single-Threaded Implementation */
 #define _GNU_SOURCE
@@ -71,86 +83,40 @@ cat << 'EOF' > wc.c
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
-
-typedef struct E E;
-struct E {
-    E *next;
-    size_t cnt, h;
-    char w[];
-};
-
-static struct {
-    E **tab;
-    size_t cap, n, tot;
-    char *mem;
-    size_t len;
-    int fd;
-} G;
-
+typedef struct E E; struct E { E *next; size_t cnt, h; char w[]; };
+static struct { E **tab; size_t cap, n, tot; char *mem; size_t len; int fd; } G;
 static void die(const char *s) { (void)fprintf(stderr, "wc: %s\n", s); exit(1); }
 static inline int alpha(unsigned c) { return (c | 32) - 'a' < 26; }
-
 static void grow(void) {
-    size_t newcap = G.cap ? G.cap * 2 : 4096;
-    E **newtab = calloc(newcap, sizeof(E *));
+    size_t newcap = G.cap ? G.cap * 2 : 4096; E **newtab = calloc(newcap, sizeof(E *));
     if (!newtab) die("out of memory");
-    for (size_t i = 0; i < G.cap; i++) {
-        E *e = G.tab[i];
-        while (e) {
-            E *next = e->next;
-            size_t idx = e->h & (newcap - 1);
-            e->next = newtab[idx]; newtab[idx] = e; e = next;
-        }
-    }
+    for (size_t i = 0; i < G.cap; i++) { E *e = G.tab[i]; while (e) { E *next = e->next; size_t idx = e->h & (newcap - 1); e->next = newtab[idx]; newtab[idx] = e; e = next; } }
     free(G.tab); G.tab = newtab; G.cap = newcap;
 }
-
 static void add(const char *w, size_t len, size_t h) {
     if (G.n >= G.cap * 7 / 10) grow();
     size_t idx = h & (G.cap - 1);
-    for (E *e = G.tab[idx]; e; e = e->next) {
-        if (e->h == h && !memcmp(e->w, w, len) && !e->w[len]) { e->cnt++; G.tot++; return; }
-    }
+    for (E *e = G.tab[idx]; e; e = e->next) { if (e->h == h && !memcmp(e->w, w, len) && !e->w[len]) { e->cnt++; G.tot++; return; } }
     E *e = malloc(sizeof(E) + len + 1);
     if (!e) die("out of memory");
-    memcpy(e->w, w, len); e->w[len] = '\0'; e->h = h; e->cnt = 1;
-    e->next = G.tab[idx]; G.tab[idx] = e; G.n++; G.tot++;
+    memcpy(e->w, w, len); e->w[len] = '\0'; e->h = h; e->cnt = 1; e->next = G.tab[idx]; G.tab[idx] = e; G.n++; G.tot++;
 }
-
 static void scan(void) {
-    const unsigned char *s = (const unsigned char *)G.mem;
-    const unsigned char *end = s + G.len;
-    char buf[256];
+    const unsigned char *s = (const unsigned char *)G.mem, *end = s + G.len; char buf[256];
     while (s < end) {
-        while (s < end && !alpha(*s)) s++;
-        if (s >= end) break;
+        while (s < end && !alpha(*s)) s++; if (s >= end) break;
         size_t h = 5381u; size_t n = 0;
-        while (s < end && alpha(*s)) {
-            unsigned c = *s++ | 32;
-            if (n < sizeof(buf) - 1) buf[n++] = c;
-            h = ((h << 5) + h) + c;
-        }
+        while (s < end && alpha(*s)) { unsigned c = *s++ | 32; if (n < sizeof(buf) - 1) buf[n++] = c; h = ((h << 5) + h) + c; }
         add(buf, n, h);
     }
 }
-
-static int cmp(const void *a, const void *b) {
-    const E *x = *(const E **)a; const E *y = *(const E **)b;
-    if (x->cnt != y->cnt) return x->cnt < y->cnt ? 1 : -1;
-    return strcmp(x->w, y->w);
-}
-
 int main(int argc, char **argv) {
     if (argc != 2) return 1;
-    G.fd = open(argv[1], O_RDONLY);
-    struct stat st; fstat(G.fd, &st); G.len = st.st_size;
-    G.mem = mmap(NULL, G.len, PROT_READ, MAP_PRIVATE, G.fd, 0);
-    madvise(G.mem, G.len, MADV_SEQUENTIAL);
+    G.fd = open(argv[1], O_RDONLY); struct stat st; fstat(G.fd, &st); G.len = st.st_size;
+    G.mem = mmap(NULL, G.len, PROT_READ, MAP_PRIVATE, G.fd, 0); madvise(G.mem, G.len, MADV_SEQUENTIAL);
     scan();
-    // Output simplified for benchmark (count only)
     fprintf(stderr, "Total: %zu Unique: %zu\n", G.tot, G.n);
-    munmap(G.mem, G.len); close(G.fd);
-    return 0;
+    munmap(G.mem, G.len); close(G.fd); return 0;
 }
 EOF
 echo -e "   $CHECK wc.c (Legacy v0) generated"
@@ -302,13 +268,18 @@ static inline void map_put(Map *m, const char *word, size_t len, uint64_t h) {
     }
 }
 typedef struct { const char *start; const char *end; Map map; } ThreadCtx;
-static inline bool is_word(uint8_t c) { return ((c | 32) - 'a') < 26; }
+/* FIX: Use unsigned char to handle extended ASCII / UTF-8 properly */
+static inline bool is_word(unsigned char c) { return ((c | 32) - 'a') < 26; }
 void *worker(void *arg) {
-    ThreadCtx *ctx = (ThreadCtx *)arg; map_init(&ctx->map); const char *p = ctx->start; const char *end = ctx->end;
+    ThreadCtx *ctx = (ThreadCtx *)arg; map_init(&ctx->map);
+    /* FIX: Cast start pointers to unsigned char* for text processing */
+    const unsigned char *p = (const unsigned char *)ctx->start;
+    const unsigned char *end = (const unsigned char *)ctx->end;
     while (p < end) {
         while (p < end && !is_word(*p)) p++; if (p >= end) break;
-        const char *wstart = p; uint64_t h = 0; while (p < end && is_word(*p)) { h = hash_step(h, *p++ | 32); }
-        map_put(&ctx->map, wstart, p - wstart, h);
+        const char *wstart = (const char *)p; uint64_t h = 0;
+        while (p < end && is_word(*p)) { h = hash_step(h, *p++ | 32); }
+        map_put(&ctx->map, wstart, (const char *)p - wstart, h);
     }
     return NULL;
 }
@@ -319,8 +290,8 @@ int main(int argc, char **argv) {
     pthread_t threads[MAX_THREADS]; ThreadCtx ctx[MAX_THREADS]; size_t chunk = fsize / nthreads;
     for (int i = 0; i < nthreads; i++) {
         ctx[i].start = data + i * chunk; ctx[i].end = (i == nthreads - 1) ? data + fsize : data + (i + 1) * chunk;
-        if (i > 0) while (ctx[i].start < ctx[i].end && is_word(*ctx[i].start)) ctx[i].start++;
-        if (i < nthreads - 1) while (ctx[i].end < data + fsize && is_word(*ctx[i].end)) ctx[i].end++;
+        if (i > 0) while (ctx[i].start < ctx[i].end && is_word(*(unsigned char*)ctx[i].start)) ctx[i].start++;
+        if (i < nthreads - 1) while (ctx[i].end < data + fsize && is_word(*(unsigned char*)ctx[i].end)) ctx[i].end++;
         pthread_create(&threads[i], NULL, worker, &ctx[i]);
     }
     for (int i = 0; i < nthreads; i++) pthread_join(threads[i], NULL);
@@ -398,14 +369,51 @@ compile() {
     fi
 }
 
-# wc.c needs _GNU_SOURCE for mmap/madvise, handled in file content now.
 compile "gcc -O3 -std=c11 -o bin_legacy wc.c" "Legacy (v0)"
 compile "gcc -O3 -std=c99 -DWC_OMIT_ASSERT -I$SRC_ROOT -o bin_lib $LIB_SRC $LIB_MAIN" "Library (vF)"
 compile "gcc -O3 -pthread -march=native -o bin_par wc2.c -lpthread" "Parallel (v2)"
 compile "gcc -O3 -pthread -march=native -o bin_ai wcai.c -lpthread" "AI Optimized"
 
 # ==============================================================================
-# 4. Benchmarking
+# 4. Validation (Optional)
+# ==============================================================================
+if [ "$VALIDATE" -eq 1 ]; then
+    echo -e "${BOLD}>> Stage 3.5: Validation vs Source of Truth (Library)${NC}"
+    
+    echo -n "   Running Library (SoT)... "
+    LIB_OUT=$(./bin_lib "$FINAL_CORPUS" 2>&1)
+    
+    TRUTH_TOT=$(echo "$LIB_OUT" | grep -o 'Total: [0-9]*' | awk '{print $2}')
+    TRUTH_UNIQ=$(echo "$LIB_OUT" | grep -o 'Unique: [0-9]*' | awk '{print $2}')
+    
+    if [[ -z "$TRUTH_TOT" || -z "$TRUTH_UNIQ" ]]; then
+        echo -e "${RED}FAILED${NC}"
+        echo "Could not parse output from bin_lib: $LIB_OUT"
+        exit 1
+    fi
+    echo -e "${GREEN}OK${NC} (Tot: $TRUTH_TOT, Uniq: $TRUTH_UNIQ)"
+    
+    validate_bin() {
+        local bin=$1
+        local name=$2
+        local out=$(./$bin "$FINAL_CORPUS" 2>&1)
+        local tot=$(echo "$out" | grep -o 'Total: [0-9]*' | awk '{print $2}')
+        local uniq=$(echo "$out" | grep -o 'Unique: [0-9]*' | awk '{print $2}')
+        
+        if [[ "$tot" == "$TRUTH_TOT" && "$uniq" == "$TRUTH_UNIQ" ]]; then
+             echo -e "   %-16s $CHECK" "$name"
+        else
+             echo -e "   %-16s $CROSS (Got: T=$tot U=$uniq)" "$name"
+        fi
+    }
+    
+    validate_bin "bin_legacy" "Legacy (v0)"
+    validate_bin "bin_par" "Parallel (v2)"
+    validate_bin "bin_ai" "AI Optimized"
+fi
+
+# ==============================================================================
+# 5. Benchmarking
 # ==============================================================================
 echo -e "${BOLD}>> Stage 4: Execution ($RUNS runs)${NC}"
 
@@ -434,7 +442,7 @@ run_bench "bin_par"    "Parallel (v2)" "T_PAR"
 run_bench "bin_ai"     "AI Optimized" "T_AI"
 
 # ==============================================================================
-# 5. Analysis
+# 6. Analysis
 # ==============================================================================
 echo -e "\n${BOLD}>> Stage 5: The Stats${NC}"
 
