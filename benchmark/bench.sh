@@ -1,9 +1,12 @@
 #!/bin/bash
 
 # ==============================================================================
-# 🚀 THE FOUR HORSEMEN: WORDCOUNT PERFORMANCE SHOWDOWN
-#    Run this script from inside the benchmark/ directory
+# 🚀 THE FOUR HORSEMEN: WORDCOUNT PERFORMANCE SHOWDOWN v3.2
+#    Self-contained: Generates all missing source code automatically.
 # ==============================================================================
+
+# --- Ensure we run inside the benchmark directory ---
+cd "$(dirname "$0")" || exit 1
 
 # --- Configuration ---
 RUNS=10
@@ -11,12 +14,10 @@ TARGET_SIZE_MB=500
 CORPUS_DIR="bench_data"
 FINAL_CORPUS="corpus_final.txt"
 
-# --- Source Paths (Relative to benchmark/ directory) ---
+# --- Source Paths ---
 SRC_ROOT=".."
-V0_SRC="$SRC_ROOT/wc.c"
 LIB_SRC="$SRC_ROOT/wordcount.c"
 LIB_MAIN="$SRC_ROOT/wc_main.c"
-LIB_HEADER="$SRC_ROOT/wordcount.h"
 
 # --- Styling ---
 BOLD='\033[1m'
@@ -35,14 +36,12 @@ CROSS="${RED}✘${NC}"
 # ==============================================================================
 clear
 echo -e "${BOLD}╔══════════════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${BOLD}║               ULTIMATE WORDCOUNT BENCHMARK SUITE v3.1                ║${NC}"
+echo -e "${BOLD}║               ULTIMATE WORDCOUNT BENCHMARK SUITE v3.2                ║${NC}"
 echo -e "${BOLD}╚══════════════════════════════════════════════════════════════════════╝${NC}"
 
-# Verify we are in the benchmark dir or can find sources
-if [[ ! -f "$V0_SRC" || ! -f "$LIB_SRC" || ! -f "$LIB_MAIN" ]]; then
-    echo -e "${RED}[ERROR]${NC} Cannot find source files in parent directory ($SRC_ROOT)."
-    echo "Please run this script from the 'benchmark/' subdirectory."
-    ls -l "$SRC_ROOT"
+if [[ ! -f "$LIB_SRC" || ! -f "$LIB_MAIN" ]]; then
+    echo -e "${RED}[ERROR]${NC} Library source files (wordcount.c, wc_main.c) not found in '$SRC_ROOT'."
+    echo "Please ensure the project structure is correct."
     exit 1
 fi
 
@@ -58,9 +57,55 @@ echo ""
 # ==============================================================================
 echo -e "${BOLD}>> Stage 1: Fabricating Contenders${NC}"
 
-# --- 1. Parallel System (wc2.c) ---
+# --- 1. Legacy (wc.c) - The "Original" Hacker Script (Generated since missing) ---
+cat << 'EOF' > wc.c
+/* wc.c - Legacy Single-Threaded Implementation (DJB2 Hash + Linked List) */
+#include <fcntl.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
+typedef struct E E; struct E { E *next; size_t cnt, h; char w[]; };
+static struct { E **tab; size_t cap, n, tot; char *mem; size_t len; int fd; } G;
+static void die(const char *s) { fprintf(stderr, "wc: %s\n", s); exit(1); }
+static inline int alpha(unsigned c) { return (c | 32) - 'a' < 26; }
+static void grow(void) {
+    size_t newcap = G.cap ? G.cap * 2 : 4096; E **newtab = calloc(newcap, sizeof(E *));
+    for (size_t i = 0; i < G.cap; i++) { E *e = G.tab[i]; while (e) { E *next = e->next; size_t idx = e->h & (newcap - 1); e->next = newtab[idx]; newtab[idx] = e; e = next; } }
+    free(G.tab); G.tab = newtab; G.cap = newcap;
+}
+static void add(const char *w, size_t len, size_t h) {
+    if (G.n >= G.cap * 7 / 10) grow();
+    size_t idx = h & (G.cap - 1);
+    for (E *e = G.tab[idx]; e; e = e->next) { if (e->h == h && !memcmp(e->w, w, len) && !e->w[len]) { e->cnt++; G.tot++; return; } }
+    E *e = malloc(sizeof(E) + len + 1);
+    memcpy(e->w, w, len); e->w[len] = '\0'; e->h = h; e->cnt = 1; e->next = G.tab[idx]; G.tab[idx] = e; G.n++; G.tot++;
+}
+static void scan(void) {
+    const unsigned char *s = (const unsigned char *)G.mem, *end = s + G.len; char buf[256];
+    while (s < end) {
+        while (s < end && !alpha(*s)) s++;
+        if (s >= end) break;
+        size_t h = 5381u, n = 0;
+        while (s < end && alpha(*s)) { unsigned c = *s++ | 32; if (n < 255) buf[n++] = c; h = ((h << 5) + h) + c; }
+        add(buf, n, h);
+    }
+}
+int main(int argc, char **argv) {
+    if (argc != 2) return 1;
+    G.fd = open(argv[1], O_RDONLY); struct stat st; fstat(G.fd, &st); G.len = st.st_size;
+    G.mem = mmap(NULL, G.len, PROT_READ, MAP_PRIVATE, G.fd, 0); madvise(G.mem, G.len, MADV_SEQUENTIAL);
+    scan(); munmap(G.mem, G.len); close(G.fd); return 0;
+}
+EOF
+echo -e "   $CHECK wc.c (Legacy v0) generated"
+
+# --- 2. Parallel System (wc2.c) - The "Balanced" Implementation ---
 cat << 'EOF' > wc2.c
-/* wc2.c - Parallel Systems Implementation */
+/* wc2.c - Parallel Systems Implementation (FNV-1a + MapReduce) */
 #define _GNU_SOURCE
 #include <ctype.h>
 #include <fcntl.h>
@@ -73,25 +118,16 @@ cat << 'EOF' > wc2.c
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
-
 #define MAX_THREADS 128
 #define INITIAL_CAP 4096
 #define FNV_OFFSET 14695981039346656037ULL
 #define FNV_PRIME 1099511628211ULL
-
 typedef struct { char *data; size_t len; } Arena;
 static void arena_init(Arena *a, size_t cap) { a->data = malloc(cap); a->len = 0; }
 static char *arena_alloc(Arena *a, size_t size) { char *p = a->data + a->len; a->len += size; return p; }
-static void arena_free(Arena *a) { free(a->data); }
-
 typedef struct { char *key; size_t count; uint64_t hash; } Entry;
 typedef struct { Entry *entries; size_t cap; size_t len; Arena arena; } Table;
-
-static void table_init(Table *t, size_t cap, size_t arena_cap) {
-    t->entries = calloc(cap, sizeof(Entry)); t->cap = cap; t->len = 0;
-    arena_init(&t->arena, arena_cap);
-}
-
+static void table_init(Table *t, size_t cap, size_t arena_cap) { t->entries = calloc(cap, sizeof(Entry)); t->cap = cap; t->len = 0; arena_init(&t->arena, arena_cap); }
 static void table_grow(Table *t) {
     size_t new_cap = t->cap * 2; Entry *new_ent = calloc(new_cap, sizeof(Entry));
     for(size_t i=0; i<t->cap; i++) {
@@ -102,92 +138,66 @@ static void table_grow(Table *t) {
     }
     free(t->entries); t->entries = new_ent; t->cap = new_cap;
 }
-
 static void table_add(Table *t, const char *word, size_t len, uint64_t hash) {
     if(t->len * 10 >= t->cap * 7) table_grow(t);
     size_t idx = hash & (t->cap - 1);
     while(1) {
         Entry *e = &t->entries[idx];
         if(!e->key) {
-            char *s = arena_alloc(&t->arena, len+1);
-            memcpy(s, word, len); s[len] = 0;
-            e->key = s; e->count = 1; e->hash = hash;
-            t->len++; return;
+            char *s = arena_alloc(&t->arena, len+1); memcpy(s, word, len); s[len] = 0;
+            e->key = s; e->count = 1; e->hash = hash; t->len++; return;
         }
         if(e->hash == hash && strcmp(e->key, word) == 0) { e->count++; return; }
         idx = (idx + 1) & (t->cap - 1);
     }
 }
-
 typedef struct { const char *data; size_t len; Table table; } Worker;
 static inline bool is_alpha_u(unsigned c) { return ((c | 32) - 'a') < 26u; }
-
 void *worker_entry(void *arg) {
     Worker *w = (Worker*)arg;
-    const unsigned char *p = (const unsigned char*)w->data;
-    const unsigned char *end = p + w->len;
-    char word[64];
+    const unsigned char *p = (const unsigned char*)w->data, *end = p + w->len; char word[64];
     table_init(&w->table, INITIAL_CAP, w->len / 4 + 4096);
-    
     while(p < end) {
-        while(p < end && !is_alpha_u(*p)) p++;
-        if(p >= end) break;
+        while(p < end && !is_alpha_u(*p)) p++; if(p >= end) break;
         uint64_t h = FNV_OFFSET; size_t len = 0;
-        while(p < end && is_alpha_u(*p)) {
-            unsigned c = *p++ | 32; h = (h ^ c) * FNV_PRIME;
-            if(len < 63) word[len++] = c;
-        }
+        while(p < end && is_alpha_u(*p)) { unsigned c = *p++ | 32; h = (h ^ c) * FNV_PRIME; if(len < 63) word[len++] = c; }
         word[len] = 0; table_add(&w->table, word, len, h);
     }
     return NULL;
 }
-
 int main(int argc, char **argv) {
-    if(argc < 2) return 1;
-    int fd = open(argv[1], O_RDONLY); struct stat st; fstat(fd, &st);
-    char *data = mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
-    madvise(data, st.st_size, MADV_SEQUENTIAL);
-    
-    int nthreads = sysconf(_SC_NPROCESSORS_ONLN);
-    if (nthreads > MAX_THREADS) nthreads = MAX_THREADS;
-    pthread_t th[MAX_THREADS]; Worker w[MAX_THREADS];
-    size_t chunk = st.st_size / nthreads;
-
+    if(argc < 2) return 1; int fd = open(argv[1], O_RDONLY); struct stat st; fstat(fd, &st);
+    char *data = mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0); madvise(data, st.st_size, MADV_SEQUENTIAL);
+    int nthreads = sysconf(_SC_NPROCESSORS_ONLN); if (nthreads > MAX_THREADS) nthreads = MAX_THREADS;
+    pthread_t th[MAX_THREADS]; Worker w[MAX_THREADS]; size_t chunk = st.st_size / nthreads;
     for(int i=0; i<nthreads; i++) {
-        size_t start = i * chunk; size_t end = (i==nthreads-1) ? st.st_size : (i+1)*chunk;
+        size_t start = i * chunk, end = (i==nthreads-1) ? st.st_size : (i+1)*chunk;
         if(i > 0) while(start < end && is_alpha_u(data[start])) start++;
         if(i < nthreads-1) while(end < st.st_size && is_alpha_u(data[end])) end++;
-        w[i].data = data + start; w[i].len = end - start;
-        pthread_create(&th[i], NULL, worker_entry, &w[i]);
+        w[i].data = data + start; w[i].len = end - start; pthread_create(&th[i], NULL, worker_entry, &w[i]);
     }
-    
     Table merged; table_init(&merged, INITIAL_CAP, st.st_size/10);
     for(int i=0; i<nthreads; i++) {
         pthread_join(th[i], NULL);
-        for(size_t j=0; j<w[i].table.cap; j++) {
-            if(w[i].table.entries[j].key) {
-                Entry *e = &w[i].table.entries[j];
-                 if(merged.len * 10 >= merged.cap * 7) table_grow(&merged);
-                 size_t idx = e->hash & (merged.cap - 1);
-                 while(1) {
-                     Entry *m = &merged.entries[idx];
-                     if(!m->key) { *m = *e; merged.len++; break; } 
-                     if(m->hash == e->hash && strcmp(m->key, e->key)==0) { m->count += e->count; break; }
-                     idx = (idx+1) & (merged.cap-1);
-                 }
-            }
+        for(size_t j=0; j<w[i].table.cap; j++) if(w[i].table.entries[j].key) {
+             if(merged.len * 10 >= merged.cap * 7) table_grow(&merged);
+             size_t idx = w[i].table.entries[j].hash & (merged.cap - 1);
+             while(1) {
+                 Entry *m = &merged.entries[idx];
+                 if(!m->key) { *m = w[i].table.entries[j]; merged.len++; break; }
+                 if(m->hash == w[i].table.entries[j].hash && strcmp(m->key, w[i].table.entries[j].key)==0) { m->count += w[i].table.entries[j].count; break; }
+                 idx = (idx+1) & (merged.cap-1);
+             }
         }
         free(w[i].table.entries);
     }
-    size_t total = 0;
-    for(size_t i=0; i<merged.cap; i++) if(merged.entries[i].key) total += merged.entries[i].count;
-    fprintf(stderr, "Total: %zu Unique: %zu\n", total, merged.len);
-    return 0;
+    size_t total = 0; for(size_t i=0; i<merged.cap; i++) if(merged.entries[i].key) total += merged.entries[i].count;
+    fprintf(stderr, "Total: %zu Unique: %zu\n", total, merged.len); return 0;
 }
 EOF
 echo -e "   $CHECK wc2.c (Parallel v2) generated"
 
-# --- 2. AI Optimized (wcai.c) ---
+# --- 3. AI Optimized (wcai.c) - The "Swiss/FxHash" Monster ---
 cat << 'EOF' > wcai.c
 /* wcai.c - Map-Reduce High-Performance Counter (Swiss+FxHash) */
 #define _GNU_SOURCE
@@ -201,126 +211,83 @@ cat << 'EOF' > wcai.c
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
-
 #define MAX_THREADS 256
 #define INITIAL_CAP 4096
 #define ARENA_BLOCK_SIZE (8 * 1024 * 1024)
-
 static inline uint64_t hash_step(uint64_t h, uint64_t c) { return (h ^ c) * 0x517cc1b727220a95; }
-
 typedef struct ArenaBlock { struct ArenaBlock *next; char data[]; } ArenaBlock;
 typedef struct { ArenaBlock *head; char *ptr; char *end; } Arena;
-
-static void arena_init(Arena *a) {
-    a->head = malloc(sizeof(ArenaBlock) + ARENA_BLOCK_SIZE);
-    a->head->next = NULL; a->ptr = a->head->data; a->end = a->ptr + ARENA_BLOCK_SIZE;
-}
-
+static void arena_init(Arena *a) { a->head = malloc(sizeof(ArenaBlock) + ARENA_BLOCK_SIZE); a->head->next = NULL; a->ptr = a->head->data; a->end = a->ptr + ARENA_BLOCK_SIZE; }
 static inline char *arena_alloc(Arena *a, size_t len) {
     if (a->ptr + len > a->end) {
         size_t size = (len > ARENA_BLOCK_SIZE) ? len + sizeof(ArenaBlock) : sizeof(ArenaBlock) + ARENA_BLOCK_SIZE;
-        ArenaBlock *new_block = malloc(size);
-        new_block->next = a->head; a->head = new_block;
-        a->ptr = new_block->data; a->end = a->ptr + (size - sizeof(ArenaBlock));
+        ArenaBlock *new_block = malloc(size); new_block->next = a->head; a->head = new_block; a->ptr = new_block->data; a->end = a->ptr + (size - sizeof(ArenaBlock));
     }
     char *ret = a->ptr; a->ptr += len; return ret;
 }
-
 typedef struct { uint64_t hash; char *key; uint32_t count; uint32_t len; } Entry;
 typedef struct { Entry *slots; size_t mask; size_t count; size_t threshold; Arena arena; } Map;
-
-static void map_init(Map *m) {
-    m->mask = INITIAL_CAP - 1; m->slots = calloc(INITIAL_CAP, sizeof(Entry));
-    m->count = 0; m->threshold = (INITIAL_CAP * 3) / 4; arena_init(&m->arena);
-}
-
+static void map_init(Map *m) { m->mask = INITIAL_CAP - 1; m->slots = calloc(INITIAL_CAP, sizeof(Entry)); m->count = 0; m->threshold = (INITIAL_CAP * 3) / 4; arena_init(&m->arena); }
 static void map_resize(Map *m) {
-    size_t new_cap = (m->mask + 1) * 2;
-    Entry *new_slots = calloc(new_cap, sizeof(Entry));
-    size_t new_mask = new_cap - 1;
+    size_t new_cap = (m->mask + 1) * 2; Entry *new_slots = calloc(new_cap, sizeof(Entry)); size_t new_mask = new_cap - 1;
     for (size_t i = 0; i <= m->mask; i++) {
-        Entry *e = &m->slots[i];
-        if (!e->key) continue;
-        size_t idx = e->hash & new_mask;
-        while (new_slots[idx].key) idx = (idx + 1) & new_mask;
-        new_slots[idx] = *e;
+        Entry *e = &m->slots[i]; if (!e->key) continue; size_t idx = e->hash & new_mask;
+        while (new_slots[idx].key) idx = (idx + 1) & new_mask; new_slots[idx] = *e;
     }
     free(m->slots); m->slots = new_slots; m->mask = new_mask; m->threshold = (new_cap * 3) / 4;
 }
-
 static inline void map_put(Map *m, const char *word, size_t len, uint64_t h) {
     size_t idx = h & m->mask;
     while (1) {
         Entry *e = &m->slots[idx];
         if (!e->key) {
             if (m->count >= m->threshold) { map_resize(m); map_put(m, word, len, h); return; }
-            char *s = arena_alloc(&m->arena, len + 1);
-            memcpy(s, word, len); s[len] = 0;
+            char *s = arena_alloc(&m->arena, len + 1); memcpy(s, word, len); s[len] = 0;
             e->key = s; e->len = len; e->hash = h; e->count = 1; m->count++; return;
         }
         if (e->hash == h && e->len == len && memcmp(e->key, word, len) == 0) { e->count++; return; }
         idx = (idx + 1) & m->mask;
     }
 }
-
 typedef struct { const char *start; const char *end; Map map; } ThreadCtx;
 static inline bool is_word(uint8_t c) { return ((c | 32) - 'a') < 26; }
-
 void *worker(void *arg) {
-    ThreadCtx *ctx = (ThreadCtx *)arg; map_init(&ctx->map);
-    const char *p = ctx->start; const char *end = ctx->end;
+    ThreadCtx *ctx = (ThreadCtx *)arg; map_init(&ctx->map); const char *p = ctx->start; const char *end = ctx->end;
     while (p < end) {
-        while (p < end && !is_word(*p)) p++;
-        if (p >= end) break;
-        const char *wstart = p; uint64_t h = 0;
-        while (p < end && is_word(*p)) { h = hash_step(h, *p++ | 32); }
+        while (p < end && !is_word(*p)) p++; if (p >= end) break;
+        const char *wstart = p; uint64_t h = 0; while (p < end && is_word(*p)) { h = hash_step(h, *p++ | 32); }
         map_put(&ctx->map, wstart, p - wstart, h);
     }
     return NULL;
 }
-
 int main(int argc, char **argv) {
-    if (argc < 2) return 1;
-    int fd = open(argv[1], O_RDONLY); struct stat st; fstat(fd, &st); size_t fsize = st.st_size;
-    char *data = mmap(NULL, fsize, PROT_READ, MAP_PRIVATE, fd, 0);
-    madvise(data, fsize, MADV_SEQUENTIAL);
-    
-    long nthreads = sysconf(_SC_NPROCESSORS_ONLN);
-    if (nthreads > MAX_THREADS) nthreads = MAX_THREADS;
-    pthread_t threads[MAX_THREADS]; ThreadCtx ctx[MAX_THREADS];
-    size_t chunk = fsize / nthreads;
-
+    if (argc < 2) return 1; int fd = open(argv[1], O_RDONLY); struct stat st; fstat(fd, &st); size_t fsize = st.st_size;
+    char *data = mmap(NULL, fsize, PROT_READ, MAP_PRIVATE, fd, 0); madvise(data, fsize, MADV_SEQUENTIAL);
+    long nthreads = sysconf(_SC_NPROCESSORS_ONLN); if (nthreads > MAX_THREADS) nthreads = MAX_THREADS;
+    pthread_t threads[MAX_THREADS]; ThreadCtx ctx[MAX_THREADS]; size_t chunk = fsize / nthreads;
     for (int i = 0; i < nthreads; i++) {
-        ctx[i].start = data + i * chunk;
-        ctx[i].end = (i == nthreads - 1) ? data + fsize : data + (i + 1) * chunk;
+        ctx[i].start = data + i * chunk; ctx[i].end = (i == nthreads - 1) ? data + fsize : data + (i + 1) * chunk;
         if (i > 0) while (ctx[i].start < ctx[i].end && is_word(*ctx[i].start)) ctx[i].start++;
         if (i < nthreads - 1) while (ctx[i].end < data + fsize && is_word(*ctx[i].end)) ctx[i].end++;
         pthread_create(&threads[i], NULL, worker, &ctx[i]);
     }
     for (int i = 0; i < nthreads; i++) pthread_join(threads[i], NULL);
-
     Map *global = &ctx[0].map;
-    size_t total = 0;
     for (int i = 1; i < nthreads; i++) {
         Map *src = &ctx[i].map;
         for (size_t j = 0; j <= src->mask; j++) {
-            Entry *e = &src->slots[j];
-            if (!e->key) continue;
+            Entry *e = &src->slots[j]; if (!e->key) continue;
             size_t idx = e->hash & global->mask;
             while (1) {
                 Entry *g = &global->slots[idx];
-                if (!g->key) {
-                    if (global->count >= global->threshold) { map_resize(global); idx = e->hash & global->mask; continue; }
-                    *g = *e; global->count++; break;
-                }
+                if (!g->key) { if (global->count >= global->threshold) { map_resize(global); idx = e->hash & global->mask; continue; } *g = *e; global->count++; break; }
                 if (g->hash == e->hash && g->len == e->len && memcmp(g->key, e->key, e->len) == 0) { g->count += e->count; break; }
                 idx = (idx + 1) & global->mask;
             }
         }
     }
-    for(size_t i=0; i<=global->mask; i++) if(global->slots[i].key) total += global->slots[i].count;
-    fprintf(stderr, "Total: %zu Unique: %zu\n", total, global->count);
-    return 0;
+    size_t total = 0; for(size_t i=0; i<=global->mask; i++) if(global->slots[i].key) total += global->slots[i].count;
+    fprintf(stderr, "Total: %zu Unique: %zu\n", total, global->count); return 0;
 }
 EOF
 echo -e "   $CHECK wcai.c (AI Optimized) generated"
@@ -373,7 +340,7 @@ compile() {
     if [ $? -eq 0 ]; then echo -e "   $CHECK $name"; else echo -e "   $CROSS $name Failed"; exit 1; fi
 }
 
-compile "gcc -O3 -std=c11 -o bin_legacy $V0_SRC" "Legacy (v0)"
+compile "gcc -O3 -std=c11 -o bin_legacy wc.c" "Legacy (v0)"
 compile "gcc -O3 -std=c99 -DWC_OMIT_ASSERT -I$SRC_ROOT -o bin_lib $LIB_SRC $LIB_MAIN" "Library (vF)"
 compile "gcc -O3 -pthread -march=native -o bin_par wc2.c -lpthread" "Parallel (v2)"
 compile "gcc -O3 -pthread -march=native -o bin_ai wcai.c -lpthread" "AI Optimized"
@@ -389,29 +356,31 @@ run_bench() {
     local bin=$1
     local name=$2
     local tmp="/tmp/wc_bench.tmp"
+    local arr_name=$3
     
     printf "   %-16s " "$name"
     for ((i=1; i<=RUNS; i++)); do
         /usr/bin/time -f "%e" -o "$tmp" ./$bin "$FINAL_CORPUS" >/dev/null 2>&1
         local res=$(cat "$tmp")
         if [ -z "$res" ]; then res="FAIL"; fi
-        eval "T_$3+=($res)"
+        # Append to array
+        eval "$arr_name+=($res)"
         printf "${BLUE}▪${NC}"
     done
     echo ""
 }
 
-run_bench "bin_legacy" "Legacy (v0)" "V0"
-run_bench "bin_lib"    "Library (vF)" "LIB"
-run_bench "bin_par"    "Parallel (v2)" "PAR"
-run_bench "bin_ai"     "AI Optimized" "AI"
+run_bench "bin_legacy" "Legacy (v0)" "T_V0"
+run_bench "bin_lib"    "Library (vF)" "T_LIB"
+run_bench "bin_par"    "Parallel (v2)" "T_PAR"
+run_bench "bin_ai"     "AI Optimized" "T_AI"
 
 # ==============================================================================
 # 5. Analysis
 # ==============================================================================
 echo -e "\n${BOLD}>> Stage 5: The Stats${NC}"
 
-# Math Helpers
+# Helper to calculate stats safely
 get_mean() {
     local arr=("${!1}")
     echo "${arr[@]}" | awk '{sum=0; cnt=0; for(i=1;i<=NF;i++) if($i!="FAIL"){sum+=$i; cnt++} if(cnt==0) print "0"; else printf "%.4f", sum/cnt}'
