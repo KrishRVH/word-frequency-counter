@@ -209,6 +209,7 @@ struct wc {
 
     Arena arena;
     wc_alloc_state alloc;
+    wc_hash_t seed; /* Seed for HashDoS protection */
 
 #if !WC_STACK_BUFFER
     char *scanbuf; /* per-instance scan buffer (size maxw) */
@@ -226,7 +227,9 @@ static int arena_init(wc *w, Arena *a, size_t block_sz);
 static void arena_free(wc *w);
 static void *arena_alloc(wc *w, size_t sz);
 
-static wc_hash_t fnv(const char *s, size_t n);
+/* UPDATED FORWARD DECLARATION */
+static wc_hash_t fnv(const char *s, size_t n, wc_hash_t seed_basis);
+
 static int tab_grow(wc *w);
 static Slot *tab_find(wc *w, const char *word, size_t n, wc_hash_t h);
 static int tab_insert(wc *w, const char *word, size_t n, wc_hash_t h);
@@ -453,9 +456,9 @@ static void *arena_alloc(wc *w, size_t sz)
 
 /* --- Hash table implementation ---------------------------------------- */
 
-static wc_hash_t fnv(const char *s, size_t n)
+static wc_hash_t fnv(const char *s, size_t n, wc_hash_t seed_basis)
 {
-    wc_hash_t h = FNV_OFF;
+    wc_hash_t h = seed_basis;
     size_t i;
 
     for (i = 0; i < n; i++) {
@@ -731,9 +734,6 @@ wc *wc_open_ex(size_t max_word, const wc_limits *limits)
         ** If uintptr_t is available, enforce that static_buf is
         ** suitably aligned for our internal alignment requirement.
         ** Misaligned buffers are rejected deterministically.
-        **
-        ** On platforms without uintptr_t, we rely on the documented
-        ** requirement that the caller supply a suitably aligned buffer.
         */
         {
             uintptr_t p = (uintptr_t)limits->static_buf;
@@ -741,6 +741,12 @@ wc *wc_open_ex(size_t max_word, const wc_limits *limits)
                 WC_FREE(w);
                 return NULL;
             }
+        }
+#else
+        /* Fallback for pre-standard/exotic envs lacking uintptr_t */
+        if (((size_t)limits->static_buf % WC_ALIGN) != 0u) {
+            WC_FREE(w);
+            return NULL;
         }
 #endif
     }
@@ -814,6 +820,14 @@ wc *wc_open_ex(size_t max_word, const wc_limits *limits)
     memset(w->tab, 0, table_bytes);
     w->cap = init_cap;
 
+    /* Initialize seed with optional user entropy */
+    {
+        wc_hash_t basis = FNV_OFF;
+        if (limits && limits->hash_seed)
+            basis ^= (wc_hash_t)limits->hash_seed;
+        w->seed = basis;
+    }
+
     /* Initialize arena. */
     if (arena_init(w, &w->arena, block_sz) < 0) {
         wc_xfree(w, w->tab, table_bytes);
@@ -884,7 +898,7 @@ int wc_add(wc *w, const char *WC_RESTRICT word)
     if (n == 0)
         return WC_OK;
 
-    h = fnv(word, n);
+    h = fnv(word, n, w->seed);
     return tab_insert(w, word, n, h) < 0 ? WC_NOMEM : WC_OK;
 }
 
@@ -932,7 +946,7 @@ int wc_scan(wc *w, const char *WC_RESTRICT text, size_t len)
         if (p >= end)
             break;
 
-        h = FNV_OFF;
+        h = w->seed;
         n = 0;
 
         while (p < end && isalpha_(*p)) {
@@ -1040,6 +1054,33 @@ int wc_results(const wc *w, wc_word **WC_RESTRICT out, size_t *WC_RESTRICT n)
 void wc_results_free(wc_word *r)
 {
     WC_FREE(r);
+}
+
+void wc_cursor_init(wc_cursor *c, const wc *w)
+{
+    if (c) {
+        c->w = w;
+        c->index = 0;
+    }
+}
+
+int wc_cursor_next(wc_cursor *c, const char **WC_RESTRICT word, size_t *WC_RESTRICT count)
+{
+    if (!c || !c->w)
+        return 0;
+
+    /* Linear scan of the open-addressed hash table */
+    while (c->index < c->w->cap) {
+        const Slot *s = &c->w->tab[c->index++];
+        if (s->word) { /* Found a populated slot */
+            if (word)
+                *word = s->word;
+            if (count)
+                *count = s->cnt;
+            return 1;
+        }
+    }
+    return 0;
 }
 
 /* --- Utility functions ------------------------------------------------- */

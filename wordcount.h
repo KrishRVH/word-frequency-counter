@@ -134,16 +134,26 @@ extern "C" {
 ** Restrict qualifier abstraction.
 **
 **   - In C99 or later, WC_RESTRICT expands to 'restrict'.
-**   - In C++, it expands to nothing (standard C++ has no 'restrict').
+**   - In C++, it uses compiler-specific extensions (__restrict) where available,
+**     or expands to nothing if not supported.
 */
 #ifndef WC_RESTRICT
-#if defined(__cplusplus)
-#define WC_RESTRICT
-#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 199901L
-#define WC_RESTRICT restrict
-#else
-#define WC_RESTRICT
-#endif
+#  if defined(__cplusplus)
+     /* C++ does not have standard 'restrict', but most compilers support it. */
+#    if defined(_MSC_VER)
+#      define WC_RESTRICT __restrict
+#    elif defined(__GNUC__) || defined(__clang__)
+#      define WC_RESTRICT __restrict__
+#    else
+#      define WC_RESTRICT
+#    endif
+#  elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 199901L
+     /* C99 standard restrict */
+#    define WC_RESTRICT restrict
+#  else
+     /* C89 or pre-standard environment */
+#    define WC_RESTRICT
+#  endif
 #endif
 
 /*
@@ -319,6 +329,9 @@ typedef struct wc_limits {
     size_t block_size;
     void *static_buf;
     size_t static_size;
+    /* Set to 0 for deterministic behavior (default)
+       Set to random value for DoS protection. */
+    unsigned long hash_seed;
 } wc_limits;
 
 /*
@@ -433,6 +446,38 @@ int wc_results(const wc *w, wc_word **WC_RESTRICT out, size_t *WC_RESTRICT n);
 */
 void wc_results_free(wc_word *r);
 
+/*
+** -------------------------------------------------------------------------
+** Zero-allocation Iterator API
+** -------------------------------------------------------------------------
+**
+** Allows iterating over all words without allocating a results array.
+** Useful for strict memory budgets or streaming processing.
+**
+** Note: Iteration order is arbitrary (based on hash table layout) and
+** is NOT sorted.
+*/
+typedef struct wc_cursor {
+    const wc *w;
+    size_t index; 
+} wc_cursor;
+
+/*
+** Initialize a cursor for iteration.
+** w must remain valid during iteration.
+*/
+void wc_cursor_init(wc_cursor *c, const wc *w);
+
+/*
+** Advance to the next word.
+**
+**   word:  Receives pointer to the stored word string.
+**   count: Receives the occurrence count.
+**
+** Returns 1 if a word was found, 0 if iteration is complete.
+*/
+
+int wc_cursor_next(wc_cursor *c, const char **WC_RESTRICT word, size_t *WC_RESTRICT count);
 /*
 ** Return human-readable error description.
 ** The returned string is static and must not be freed.
