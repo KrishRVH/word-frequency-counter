@@ -62,26 +62,26 @@
     { "name": "mingw", "configurePreset": "mingw" }
   ],
   "testPresets": [
-  {
-    "name": "clang",
-    "configurePreset": "clang",
-    "output": {
-      "outputOnFailure": false
+    {
+      "name": "clang",
+      "configurePreset": "clang",
+      "output": {
+       "outputOnFailure": false
+      }
+    },
+    {
+      "name": "gcc",
+      "configurePreset": "gcc",
+      "output": {
+        "outputOnFailure": false
+      }
+    },
+    {
+      "name": "tcc",
+      "configurePreset": "tcc",
+      "output": {
+        "outputOnFailure": false
+      }
     }
-  },
-  {
-    "name": "gcc",
-    "configurePreset": "gcc",
-    "output": {
-      "outputOnFailure": false
-    }
-  },
-  {
-    "name": "tcc",
-    "configurePreset": "tcc",
-    "output": {
-      "outputOnFailure": false
-    }
-  }
-]
+  ]
 }
