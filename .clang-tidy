@@ -5,7 +5,6 @@
 #   - Treat "this can be wrong" diagnostics as errors (analyzer/bugprone/cert/etc.)
 #   - Keep pure readability/style as non-fatal guidance (still reported)
 #   - Avoid noise from system headers
-
 Checks: >-
   -*,
   clang-analyzer-*,
@@ -24,13 +23,12 @@ Checks: >-
   -bugprone-sizeof-expression,
   -cert-dcl37-c,
   -cert-dcl51-cpp
- 
 WarningsAsErrors: >-
   clang-analyzer-*,
   bugprone-*,
   cert-*,
   portability-*,
   performance-*
-HeaderFilterRegex: '(^|/)(wordcount|wc_.*)\.h$'
+HeaderFilterRegex: '(^|/)(wordcount|wc_.*)\.(c|h)$'
 SystemHeaders: false
 FormatStyle: file

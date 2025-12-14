@@ -67,7 +67,7 @@ list_files | xargs -0 -r -P "$JOBS" clang-format -i
 note "Running clang-tidy..."
 if cdb_dir="$(detect_cdb_dir)"; then
   list_c_files | xargs -0 -r -P "$JOBS" -n 1 \
-    clang-tidy -p "$cdb_dir" -quiet
+    clang-tidy -p "$cdb_dir"
 else
   note "No $CDB found (expected in repo root or build dir); skipping clang-tidy."
 fi
