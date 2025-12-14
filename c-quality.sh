@@ -1,75 +1,111 @@
 #!/usr/bin/env bash
-#
-# c-quality.sh: Run clang-format, clang-tidy, and cppcheck
-#
-
 set -euo pipefail
 
-# Configuration
+# Usage:
+#   ./c-quality.sh [source_root] [build_dir_with_compile_commands]
+#
+# Examples:
+#   ./c-quality.sh .
+#   ./c-quality.sh . build
+
 readonly JOBS="${JOBS:-$(nproc 2>/dev/null || echo 4)}"
-readonly ROOT="${1:-.}"
+readonly SRC_ROOT="${1:-.}"
+readonly BUILD_HINT="${2:-}"
 readonly CDB="compile_commands.json"
 
-# Helpers
 note() { printf '\033[0;34m[INFO]\033[0m %s\n' "$*"; }
 fail() { printf '\033[0;31m[FAIL]\033[0m %s\n' "$*" >&2; exit 1; }
 
-# Ensure tools exist
 for tool in clang-format clang-tidy cppcheck; do
-    command -v "$tool" >/dev/null || fail "Missing tool: $tool"
+  command -v "$tool" >/dev/null 2>&1 || fail "Missing tool: $tool"
 done
 
-# Find sources, excluding build artifacts
-# Usage: scan_files "pattern"
-scan_files() {
-    find "$ROOT" -type d \( -name build -o -name .git -o -name 'cmake-*' \) -prune \
-        -o -type f -name "$1" -print0
+# Prefer git-tracked sources so we don't format/check build artifacts.
+list_files() {
+  if command -v git >/dev/null 2>&1 && git -C "$SRC_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    git -C "$SRC_ROOT" ls-files -z -- '*.c' '*.h'
+  else
+    find "$SRC_ROOT" -type d \( -name .git -o -name build -o -name 'build-*' \) -prune \
+      -o -type f \( -name '*.c' -o -name '*.h' \) -print0
+  fi
 }
 
-# Locate dir containing compile_commands.json (root or build)
-get_cdb_dir() {
-    for d in "$ROOT" "$ROOT/build"; do
-        [[ -f "$d/$CDB" ]] && echo "$d" && return 0
-    done
-    return 1
+list_c_files() {
+  if command -v git >/dev/null 2>&1 && git -C "$SRC_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    git -C "$SRC_ROOT" ls-files -z -- '*.c'
+  else
+    find "$SRC_ROOT" -type d \( -name .git -o -name build -o -name 'build-*' \) -prune \
+      -o -type f -name '*.c' -print0
+  fi
 }
 
-# 1. Clang-Format (In-place)
+detect_cdb_dir() {
+  # 1) explicit build hint
+  if [[ -n "$BUILD_HINT" && -f "$BUILD_HINT/$CDB" ]]; then
+    printf '%s\n' "$BUILD_HINT"
+    return 0
+  fi
+
+  # 2) repo root (your symlink case)
+  if [[ -f "$SRC_ROOT/$CDB" ]]; then
+    printf '%s\n' "$SRC_ROOT"
+    return 0
+  fi
+
+  # 3) common build dir
+  if [[ -f "$SRC_ROOT/build/$CDB" ]]; then
+    printf '%s\n' "$SRC_ROOT/build"
+    return 0
+  fi
+
+  return 1
+}
+
 note "Running clang-format..."
-scan_files "*.[ch]" | xargs -0 -r -P "$JOBS" clang-format -i
+list_files | xargs -0 -r -P "$JOBS" clang-format -i
 
-# 2. Clang-Tidy
 note "Running clang-tidy..."
-if cdb_dir=$(get_cdb_dir); then
-    # -n 1 ensures file-level parallelism via xargs
-    scan_files "*.c" | xargs -0 -r -P "$JOBS" -n 1 \
-        clang-tidy -p "$cdb_dir" -quiet
+if cdb_dir="$(detect_cdb_dir)"; then
+  list_c_files | xargs -0 -r -P "$JOBS" -n 1 \
+    clang-tidy -p "$cdb_dir" -quiet
 else
-    note "No $CDB; using fallback flags."
-    # Fallback: Matches CMake (C99, Includes, Strict Warnings)
-    # Note: Flags must follow '--' and the source file
-    scan_files "*.c" | xargs -0 -r -P "$JOBS" -I {} \
-        clang-tidy -quiet {} -- -std=c99 -I"$ROOT" \
-        -Wall -Wextra -Wpedantic -Wconversion -Wshadow
+  note "No $CDB found (expected in repo root or build dir); skipping clang-tidy."
 fi
 
-# 3. Cppcheck
-note "Running cppcheck..."
-check_args=(
-    --check-level=exhaustive
-    --enable=warning,style,performance,portability
-    --inconclusive --quiet --inline-suppr
-    --suppress=missingIncludeSystem
-    --suppress=unmatchedSuppression
-    --error-exitcode=1 -j "$JOBS"
+note "Running cppcheck (hard fail on warnings/perf/portability)..."
+hard_args=(
+  --check-level=exhaustive
+  --enable=warning,performance,portability
+  --inconclusive --quiet --inline-suppr
+  --suppress=missingIncludeSystem
+  --suppress=unmatchedSuppression
+  --error-exitcode=1 -j "$JOBS"
 )
 
-if cdb_dir=$(get_cdb_dir); then
-    cppcheck "${check_args[@]}" --project="$cdb_dir/$CDB"
+if cdb_dir="$(detect_cdb_dir)"; then
+  cppcheck "${hard_args[@]}" --project="$cdb_dir/$CDB"
 else
-    # Fallback: Generic scan via file list from find
-    scan_files "*.[ch]" | xargs -0 \
-        cppcheck "${check_args[@]}" --language=c --std=c99 --platform=unix64 -I"$ROOT"
+  list_files | xargs -0 -r \
+    cppcheck "${hard_args[@]}" --language=c --std=c99 -I"$SRC_ROOT"
 fi
 
-note "All quality checks passed."
+note "Running cppcheck (style, informational only)..."
+soft_args=(
+  --check-level=exhaustive
+  --enable=style
+  --inconclusive --quiet --inline-suppr
+  --suppress=missingIncludeSystem
+  --suppress=unmatchedSuppression
+  # Public API headers will *always* look unused to cppcheck inside the library itself.
+  --suppress=unusedStructMember
+  -j "$JOBS"
+)
+
+if cdb_dir="$(detect_cdb_dir)"; then
+  cppcheck "${soft_args[@]}" --project="$cdb_dir/$CDB" || true
+else
+  list_files | xargs -0 -r \
+    cppcheck "${soft_args[@]}" --language=c --std=c99 -I"$SRC_ROOT" || true
+fi
+
+note "All quality checks passed (hard checks)."

@@ -1,33 +1,50 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+JOBS="${JOBS:-$(nproc 2>/dev/null || echo 4)}"
+
 run_preset() {
-    local preset="$1"
-    echo "----------------------------------------------------"
-    echo "Running preset: $preset"
-    echo "----------------------------------------------------"
-    
-    # 1. Configure
-    cmake --preset "$preset"
-    
-    # 2. Build (Now finds the 'buildPreset' named $preset)
-    cmake --build --preset "$preset" --parallel "$(nproc)"
-    
-    # 3. Test (Skip MinGW)
-    if [[ "$preset" != "mingw" ]]; then
-        ctest --preset "$preset"
-    fi
+  local preset="$1"
+  echo "----------------------------------------------------"
+  echo "Running preset: $preset"
+  echo "----------------------------------------------------"
+
+  cmake --preset "$preset"
+  cmake --build --preset "$preset" --parallel "$JOBS"
+
+  # Skip running Windows binaries by default
+  if [[ "$preset" != "mingw" ]]; then
+    ctest --preset "$preset"
+  fi
 }
 
-# Run the matrix
-run_preset clang
-run_preset gcc
+presets=(clang gcc)
 
-# Checks for optional tools
-if command -v tcc >/dev/null; then run_preset tcc; fi
-if command -v x86_64-w64-mingw32-gcc >/dev/null; then run_preset mingw; fi
+if command -v ccomp >/dev/null 2>&1; then
+  presets+=(compcert)
+else
+  echo "[INFO] ccomp not found; skipping CompCert preset."
+fi
 
-# Static Analysis on the main build
-./c-quality.sh build-clang
+if command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1; then
+  presets+=(mingw)
+else
+  echo "[INFO] x86_64-w64-mingw32-gcc not found; skipping MinGW preset."
+fi
+
+for p in "${presets[@]}"; do
+  run_preset "$p"
+done
+
+# Quality checks: run on repo sources, use build/clang if present
+echo "----------------------------------------------------"
+echo "Running quality checks"
+echo "----------------------------------------------------"
+if [[ -f "$ROOT/build/clang/compile_commands.json" ]]; then
+  "$ROOT/c-quality.sh" "$ROOT" "$ROOT/build/clang"
+else
+  "$ROOT/c-quality.sh" "$ROOT"
+fi
 
 echo "✅ GAMUT COMPLETE"

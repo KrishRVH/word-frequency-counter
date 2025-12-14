@@ -11,33 +11,28 @@
 **
 **   Stdin is processed in streaming chunks to keep host memory usage
 **   bounded. A small carry buffer is used to handle words that span
-**   chunk boundaries. The streaming scanner implements the same word
-**   model as wc_scan():
+**   chunk boundaries.
+**
+**   The streaming scanner implements the same word model as wc_scan():
 **
 **     - ASCII letters A–Z/a–z are word characters.
 **     - All other bytes are separators.
-**     - Words are lowercased and truncated to the library’s max_word
-**       before insertion, via wc_add().
+**     - Words are lowercased and truncated before insertion via wc_add().
 **
-**   The net effect is equivalent to running wc_scan() on the entire
-**   stdin stream as a single contiguous buffer, but without needing to
-**   materialize that buffer in memory.
+**   NOTE ABOUT BUILD MISMATCHES
 **
-**   On Windows, command-line arguments are obtained in UTF-16 via
-**   GetCommandLineW/CommandLineToArgvW, converted to UTF-8, and file
-**   paths are converted back to UTF-16 for CreateFileW. This allows
-**   proper handling of non-ASCII filenames.
-**
-**   Error handling follows the goto-cleanup canonical pattern from
-**   Linux kernel and SQLite style guides.
+**   wc_main.c is compiled against wordcount.h but may be linked against a
+**   separately-built wordcount.c with different build macros (WC_MAX_WORD,
+**   etc.). To avoid mismatches, the stdin carry buffer is sized using
+**   wc_build_info()->max_word at runtime.
 **
 ** Usage: wc [file ...]
 **   Reads stdin if no files given. Top 10 to stdout, summary to stderr.
 **
 ** Environment:
-**   WC_MAX_BYTES  - Optional soft cap on internal heap usage for
+**   WC_MAX_BYTES  - Optional hard cap on internal heap usage for
 **                   the wc object, in bytes (e.g. "8388608" for 8MB).
-**                   If unset or invalid, defaults to no explicit cap.
+**                   Must be a non-negative decimal integer.
 */
 #ifndef WC_NO_HOSTED_MAIN
 
@@ -52,10 +47,6 @@
 #define TOPN 10
 #define STDIN_CHUNK 65536
 
-/*
-** EFBIG is POSIX, not C99. Provide fallback for exotic toolchains.
-** ERANGE is C99-guaranteed and semantically closest.
-*/
 #ifndef EFBIG
 #define EFBIG ERANGE
 #endif
@@ -65,6 +56,7 @@
 static int parse_wc_limits_from_env(wc_limits *lim)
 {
     const char *env;
+    const char *p;
     char *end;
     unsigned long long v;
 
@@ -75,7 +67,15 @@ static int parse_wc_limits_from_env(wc_limits *lim)
 
     env = getenv("WC_MAX_BYTES");
     if (!env || !*env)
-        return 0; /* no limits */
+        return 0;
+
+    /* Reject negative values even though strtoull would accept them. */
+    p = env;
+    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r' || *p == '\f' ||
+           *p == '\v')
+        p++;
+    if (*p == '-')
+        return -1;
 
     errno = 0;
     v = strtoull(env, &end, 10);
@@ -86,53 +86,59 @@ static int parse_wc_limits_from_env(wc_limits *lim)
         v = (unsigned long long)SIZE_MAX;
 
     lim->max_bytes = (size_t)v;
-    /* init_cap/block_size left at 0 => library defaults */
     return 1;
 }
 
 /* --- Streaming scanner for stdin -------------------------------------- */
 
-/*
-** Small carry buffer to hold a partial word that spans chunk
-** boundaries. We size it at WC_MAX_WORD+1 to always have room for a
-** terminating NUL when calling wc_add().
-**
-** NOTE
-**
-**   - The library’s runtime max_word (w->maxw) is clamped to
-**     WC_MAX_WORD, so storing up to WC_MAX_WORD characters here is
-**     safe: wc_add() will only consider the first max_word bytes.
-**   - We lowercase characters here so that stdin scanning matches the
-**     case-folding semantics of wc_scan().
-*/
 typedef struct {
-    char buf[WC_MAX_WORD + 1];
-    size_t len;
+    char *buf;  /* allocated as cap+1 */
+    size_t cap; /* maximum bytes stored (excluding NUL) */
+    size_t len; /* current length */
 } ScanState;
 
 static int isalpha_ascii(unsigned char c)
 {
-    return ((unsigned)c | 32u) - 'a' < 26;
+    return ((unsigned)c | 32u) - 'a' < 26u;
 }
 
-/*
-** Scan a single stdin chunk.
-**
-** This is a streaming implementation of the same word model used by
-** wc_scan():
-**
-**   - Reads bytes in order.
-**   - Treats maximal runs of ASCII letters as words.
-**   - Lowercases letters using the 'c | 32' trick.
-**   - Truncates each word to at most WC_MAX_WORD bytes in the carry
-**     buffer; wc_add() will further clamp to the instance’s max_word.
-**
-** Words that cross chunk boundaries are assembled incrementally in
-** ScanState and flushed exactly once when the first non-letter
-** separator after the run is seen (or on EOF).
-*/
-static int
-scan_chunk_stream(wc *w, ScanState *st, const char *buf, size_t len)
+static int scanstate_init(ScanState *st)
+{
+    const wc_build_config *cfg;
+    size_t cap = WC_MAX_WORD;
+
+    if (!st)
+        return -1;
+
+    memset(st, 0, sizeof *st);
+
+    cfg = wc_build_info();
+    if (cfg && cfg->max_word > 0)
+        cap = cfg->max_word;
+
+    /* cap is a compile-time bound from the library; ensure sane. */
+    if (cap < 4)
+        cap = 4;
+
+    st->buf = (char *)malloc(cap + 1);
+    if (!st->buf)
+        return -1;
+
+    st->cap = cap;
+    st->len = 0;
+    st->buf[0] = '\0';
+    return 0;
+}
+
+static void scanstate_free(ScanState *st)
+{
+    if (!st)
+        return;
+    free(st->buf);
+    memset(st, 0, sizeof *st);
+}
+
+static int scan_chunk_stream(wc *w, ScanState *st, const char *buf, size_t len)
 {
     const unsigned char *p = (const unsigned char *)buf;
     const unsigned char *end = p + len;
@@ -142,13 +148,12 @@ scan_chunk_stream(wc *w, ScanState *st, const char *buf, size_t len)
 
         if (isalpha_ascii(c)) {
             c = (unsigned char)(c | 32u);
-            if (st->len < WC_MAX_WORD) {
+            if (st->len < st->cap) {
                 st->buf[st->len++] = (char)c;
             }
         } else {
             if (st->len > 0) {
                 int rc;
-
                 st->buf[st->len] = '\0';
                 rc = wc_add(w, st->buf);
                 if (rc != WC_OK)
@@ -176,59 +181,64 @@ typedef struct {
     HANDLE hMap;
 } MappedFile;
 
-/*
-** Map Win32 error to errno. Uses common mappings for portability.
-*/
 static void set_errno_from_win32(void)
 {
     DWORD err = GetLastError();
-    if (err == ERROR_FILE_NOT_FOUND ||
-        err == ERROR_PATH_NOT_FOUND) {
+    if (err == ERROR_FILE_NOT_FOUND || err == ERROR_PATH_NOT_FOUND) {
         errno = ENOENT;
     } else if (err == ERROR_ACCESS_DENIED) {
         errno = EACCES;
-    } else if (err == ERROR_NOT_ENOUGH_MEMORY ||
-               err == ERROR_OUTOFMEMORY) {
+    } else if (err == ERROR_NOT_ENOUGH_MEMORY || err == ERROR_OUTOFMEMORY) {
         errno = ENOMEM;
+    } else if (err == ERROR_NO_UNICODE_TRANSLATION) {
+        errno = EINVAL;
     } else {
         errno = EIO;
     }
 }
 
-/* Helper: Convert UTF-8 path to UTF-16 for Windows APIs. */
+/* Convert UTF-8 path to UTF-16; sets errno precisely on failure. */
 static wchar_t *utf8_to_wide(const char *utf8)
 {
     int n;
     wchar_t *wstr;
 
-    if (!utf8)
+    if (!utf8) {
+        errno = EINVAL;
         return NULL;
+    }
 
-    n = MultiByteToWideChar(CP_UTF8, 0, utf8, -1, NULL, 0);
-    if (n <= 0)
+    /* MB_ERR_INVALID_CHARS causes invalid UTF-8 to fail deterministically. */
+    n = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, utf8, -1, NULL, 0);
+    if (n <= 0) {
+        DWORD e = GetLastError();
+        if (e == ERROR_NO_UNICODE_TRANSLATION)
+            errno = EINVAL;
+        else
+            errno = EIO;
         return NULL;
+    }
 
     wstr = (wchar_t *)malloc((size_t)n * sizeof *wstr);
-    if (!wstr)
+    if (!wstr) {
+        errno = ENOMEM;
         return NULL;
+    }
 
-    if (MultiByteToWideChar(CP_UTF8,
-                            0,
-                            utf8,
-                            -1,
-                            wstr,
-                            n) <= 0) {
+    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, utf8, -1, wstr, n) <=
+        0) {
+        DWORD e = GetLastError();
         free(wstr);
+        if (e == ERROR_NO_UNICODE_TRANSLATION)
+            errno = EINVAL;
+        else
+            errno = EIO;
         return NULL;
     }
 
     return wstr;
 }
 
-/*
-** On Windows, standard argv is ANSI (codepage dependent). Fetch the
-** command line in UTF-16 and convert arguments to UTF-8.
-*/
 static char **win32_get_args_utf8(int *argc_out)
 {
     int wargc = 0;
@@ -243,28 +253,17 @@ static char **win32_get_args_utf8(int *argc_out)
     if (!wargv)
         return NULL;
 
-    /* Allocate pointer array (+1 for NULL terminator). */
-    uargv = (char **)malloc(
-            ((size_t)wargc + 1u) * sizeof *uargv);
+    uargv = (char **)malloc(((size_t)wargc + 1u) * sizeof *uargv);
     if (!uargv) {
         LocalFree(wargv);
         return NULL;
     }
 
     for (i = 0; i < wargc; i++) {
-        int n = WideCharToMultiByte(CP_UTF8,
-                                    0,
-                                    wargv[i],
-                                    -1,
-                                    NULL,
-                                    0,
-                                    NULL,
-                                    NULL);
-        if (n <= 0) {
-            /* Fallback: treat as empty string on conversion
-               failure. */
+        int n = WideCharToMultiByte(
+                CP_UTF8, 0, wargv[i], -1, NULL, 0, NULL, NULL);
+        if (n <= 0)
             n = 1;
-        }
 
         uargv[i] = (char *)malloc((size_t)n);
         if (!uargv[i]) {
@@ -276,15 +275,8 @@ static char **win32_get_args_utf8(int *argc_out)
             return NULL;
         }
 
-        if (WideCharToMultiByte(CP_UTF8,
-                                0,
-                                wargv[i],
-                                -1,
-                                uargv[i],
-                                n,
-                                NULL,
-                                NULL) <= 0) {
-            /* Treat as empty string on failure. */
+        if (WideCharToMultiByte(
+                    CP_UTF8, 0, wargv[i], -1, uargv[i], n, NULL, NULL) <= 0) {
             uargv[i][0] = '\0';
         }
     }
@@ -298,18 +290,13 @@ static char **win32_get_args_utf8(int *argc_out)
 static void win32_free_args_utf8(char **argv, int argc)
 {
     int i;
-
     if (!argv)
         return;
-
     for (i = 0; i < argc; i++)
         free(argv[i]);
     free(argv);
 }
 
-/*
-** Windows implementation using CreateFileMapping.
-*/
 static int os_map(MappedFile *mf, const char *path)
 {
     LARGE_INTEGER sz;
@@ -325,10 +312,8 @@ static int os_map(MappedFile *mf, const char *path)
     mf->hMap = NULL;
 
     wpath = utf8_to_wide(path);
-    if (!wpath) {
-        errno = ENOMEM;
+    if (!wpath)
         return -1;
-    }
 
     mf->hFile = CreateFileW(wpath,
                             GENERIC_READ,
@@ -354,25 +339,18 @@ static int os_map(MappedFile *mf, const char *path)
     if (sz.QuadPart == 0) {
         CloseHandle(mf->hFile);
         mf->hFile = INVALID_HANDLE_VALUE;
-        return 0; /* empty file is ok */
+        return 0;
     }
 
-    /* Reject files larger than size_t can represent. */
     if (sz.QuadPart < 0 ||
-        (unsigned long long)sz.QuadPart >
-                (unsigned long long)SIZE_MAX) {
+        (unsigned long long)sz.QuadPart > (unsigned long long)SIZE_MAX) {
         CloseHandle(mf->hFile);
         mf->hFile = INVALID_HANDLE_VALUE;
         errno = EFBIG;
         return -1;
     }
 
-    mf->hMap = CreateFileMappingW(mf->hFile,
-                                  NULL,
-                                  PAGE_READONLY,
-                                  0,
-                                  0,
-                                  NULL);
+    mf->hMap = CreateFileMappingW(mf->hFile, NULL, PAGE_READONLY, 0, 0, NULL);
     if (!mf->hMap) {
         set_errno_from_win32();
         CloseHandle(mf->hFile);
@@ -380,11 +358,7 @@ static int os_map(MappedFile *mf, const char *path)
         return -1;
     }
 
-    mf->data = MapViewOfFile(mf->hMap,
-                             FILE_MAP_READ,
-                             0,
-                             0,
-                             0);
+    mf->data = MapViewOfFile(mf->hMap, FILE_MAP_READ, 0, 0, 0);
     if (!mf->data) {
         set_errno_from_win32();
         CloseHandle(mf->hMap);
@@ -414,11 +388,8 @@ static void os_unmap(MappedFile *mf)
     mf->hFile = INVALID_HANDLE_VALUE;
 }
 
-#else /* !_WIN32 */
+#else /* POSIX */
 
-/*
-** POSIX implementation using mmap.
-*/
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -458,10 +429,9 @@ static int os_map(MappedFile *mf, const char *path)
     if (st.st_size == 0) {
         close(mf->fd);
         mf->fd = -1;
-        return 0; /* empty file is ok */
+        return 0;
     }
 
-    /* Reject files larger than size_t can represent (32-bit builds). */
     if ((off_t)(size_t)st.st_size != st.st_size) {
         close(mf->fd);
         mf->fd = -1;
@@ -469,12 +439,8 @@ static int os_map(MappedFile *mf, const char *path)
         return -1;
     }
 
-    mf->data = mmap(NULL,
-                    (size_t)st.st_size,
-                    PROT_READ,
-                    MAP_PRIVATE,
-                    mf->fd,
-                    0);
+    mf->data =
+            mmap(NULL, (size_t)st.st_size, PROT_READ, MAP_PRIVATE, mf->fd, 0);
     if (mf->data == MAP_FAILED) {
         saved_errno = errno;
         mf->data = NULL;
@@ -485,9 +451,7 @@ static int os_map(MappedFile *mf, const char *path)
     }
 
 #ifdef MADV_SEQUENTIAL
-    (void)madvise(mf->data,
-                  (size_t)st.st_size,
-                  MADV_SEQUENTIAL);
+    (void)madvise(mf->data, (size_t)st.st_size, MADV_SEQUENTIAL);
 #endif
 
     mf->size = (size_t)st.st_size;
@@ -515,24 +479,11 @@ static void os_unmap(MappedFile *mf)
 static int
 process_mapped(wc *w, const char *data, size_t size, const char *name)
 {
-    int rc;
-
-    rc = wc_scan(w, data, size);
-    if (rc == WC_NOMEM) {
-        (void)fprintf(stderr,
-                      "wc: %s: %s\n",
-                      name,
-                      wc_errstr(rc));
-        return -1;
-    }
+    int rc = wc_scan(w, data, size);
     if (rc != WC_OK) {
-        (void)fprintf(stderr,
-                      "wc: %s: %s\n",
-                      name,
-                      wc_errstr(rc));
+        (void)fprintf(stderr, "wc: %s: %s\n", name, wc_errstr(rc));
         return -1;
     }
-
     return 0;
 }
 
@@ -544,10 +495,7 @@ static int process_file(wc *w, const char *path)
     memset(&mf, 0, sizeof mf);
 
     if (os_map(&mf, path) < 0) {
-        (void)fprintf(stderr,
-                      "wc: %s: %s\n",
-                      path,
-                      strerror(errno));
+        (void)fprintf(stderr, "wc: %s: %s\n", path, strerror(errno));
         goto cleanup;
     }
 
@@ -556,10 +504,7 @@ static int process_file(wc *w, const char *path)
         goto cleanup;
     }
 
-    rc = process_mapped(w,
-                        (const char *)mf.data,
-                        mf.size,
-                        path);
+    rc = process_mapped(w, (const char *)mf.data, mf.size, path);
 
 cleanup:
     os_unmap(&mf);
@@ -572,42 +517,48 @@ static int process_stdin(wc *w)
     ScanState st;
     int rc;
 
-    memset(&st, 0, sizeof st);
+    if (scanstate_init(&st) < 0) {
+        (void)fprintf(stderr, "wc: <stdin>: initialization failed (OOM)\n");
+        return -1;
+    }
 
     for (;;) {
         size_t n = fread(buf, 1, sizeof buf, stdin);
+
         if (n > 0) {
             rc = scan_chunk_stream(w, &st, buf, n);
             if (rc != WC_OK) {
-                (void)fprintf(stderr,
-                              "wc: <stdin>: %s\n",
-                              wc_errstr(rc));
+                (void)fprintf(stderr, "wc: <stdin>: %s\n", wc_errstr(rc));
+                scanstate_free(&st);
                 return -1;
             }
         }
+
         if (n < sizeof buf) {
             if (ferror(stdin)) {
-                (void)fprintf(stderr,
-                              "wc: <stdin>: %s\n",
-                              strerror(errno));
+                int e = errno;
+                if (e)
+                    (void)fprintf(stderr, "wc: <stdin>: %s\n", strerror(e));
+                else
+                    (void)fprintf(stderr, "wc: <stdin>: I/O error\n");
+                scanstate_free(&st);
                 return -1;
             }
-            break; /* EOF */
+            break;
         }
     }
 
-    /* Flush any remaining partial word at EOF. */
     if (st.len > 0) {
         st.buf[st.len] = '\0';
         rc = wc_add(w, st.buf);
         if (rc != WC_OK) {
-            (void)fprintf(stderr,
-                          "wc: <stdin>: %s\n",
-                          wc_errstr(rc));
+            (void)fprintf(stderr, "wc: <stdin>: %s\n", wc_errstr(rc));
+            scanstate_free(&st);
             return -1;
         }
     }
 
+    scanstate_free(&st);
     return 0;
 }
 
@@ -621,10 +572,6 @@ static void output(const wc *w)
     int rc;
 
     rc = wc_results(w, &words, &len);
-    if (rc == WC_NOMEM) {
-        (void)fprintf(stderr, "wc: %s\n", wc_errstr(rc));
-        goto cleanup;
-    }
     if (rc != WC_OK) {
         (void)fprintf(stderr, "wc: %s\n", wc_errstr(rc));
         goto cleanup;
@@ -634,26 +581,25 @@ static void output(const wc *w)
         (void)fprintf(stderr, "No words found.\n");
         goto cleanup;
     }
+
     {
+        const size_t total = wc_total(w);
         size_t n = len < TOPN ? len : TOPN;
 
         printf("\n%7s  %-20s  %s\n", "Count", "Word", "%");
         printf("-------  --------------------  ------\n");
 
         for (i = 0; i < n; i++) {
-            double pct = 100.0 *
-                         (double)words[i].count /
-                         (double)wc_total(w);
-            printf("%7zu  %-20s  %5.2f\n",
-                   words[i].count,
-                   words[i].word,
-                   pct);
+            double pct = 0.0;
+            if (total > 0)
+                pct = 100.0 * (double)words[i].count / (double)total;
+
+            printf("%7zu  %-20s  %5.2f\n", words[i].count, words[i].word, pct);
         }
     }
-    (void)fprintf(stderr,
-                  "\nTotal: %zu  Unique: %zu\n",
-                  wc_total(w),
-                  wc_unique(w));
+
+    (void)fprintf(
+            stderr, "\nTotal: %zu  Unique: %zu\n", wc_total(w), wc_unique(w));
 
 cleanup:
     wc_results_free(words);
@@ -669,17 +615,14 @@ int main(int argc, char **argv)
     int rc = 1;
     wc_limits lim;
     int have_limits;
+
 #ifdef _WIN32
     int argc_win = 0;
     char **argv_win = NULL;
-#endif
 
-#ifdef _WIN32
-    /* Re-acquire argv in UTF-8 for correct Unicode handling. */
     argv_win = win32_get_args_utf8(&argc_win);
     if (!argv_win) {
-        (void)fprintf(stderr,
-                      "wc: initialization failed (OOM)\n");
+        (void)fprintf(stderr, "wc: initialization failed (OOM)\n");
         return 1;
     }
     argc = argc_win;
@@ -689,21 +632,14 @@ int main(int argc, char **argv)
     have_limits = parse_wc_limits_from_env(&lim);
     if (have_limits < 0) {
         (void)fprintf(stderr,
-                      "wc: invalid WC_MAX_BYTES value "
-                      "(must be integer)\n");
+                      "wc: invalid WC_MAX_BYTES value (must be non-negative "
+                      "integer)\n");
         goto cleanup;
     }
 
-    if (have_limits > 0) {
-        w = wc_open_ex(0, &lim);
-    } else {
-        w = wc_open(0);
-    }
-
+    w = (have_limits > 0) ? wc_open_ex(0, &lim) : wc_open(0);
     if (!w) {
-        (void)fprintf(stderr,
-                      "wc: %s\n",
-                      wc_errstr(WC_NOMEM));
+        (void)fprintf(stderr, "wc: %s\n", wc_errstr(WC_NOMEM));
         goto cleanup;
     }
 
