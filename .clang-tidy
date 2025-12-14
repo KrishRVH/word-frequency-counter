@@ -8,54 +8,29 @@
 
 Checks: >-
   -*,
-
-  # Core bug finding / correctness
   clang-analyzer-*,
   bugprone-*,
   cert-*,
   portability-*,
   performance-*,
-
-  # Targeted style rule you explicitly want enforced
   readability-isolate-declaration,
-
-  # High-signal misc check
   misc-redundant-expression,
-
-  # --- Explicit exclusions (project policy / false positives / intent) ---
   -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling,
-
-  # Naming / API style: you intentionally use leading underscores / C idioms in places.
   -bugprone-reserved-identifier,
-
-  # Benign in C APIs and often conflicts with readability preferences.
   -bugprone-easily-swappable-parameters,
-
-  # Intentional patterns:
   -bugprone-assignment-in-if-condition,
-
-  # Your code is explicitly careful about casts/limits; this tends to be noisy.
   -bugprone-narrowing-conversions,
   -bugprone-multi-level-implicit-pointer-conversion,
-
-  # You intentionally prefer sizeof(*ptr) allocation idiom; keep this off.
   -bugprone-sizeof-expression,
-
-  # CERT checks that are C++-oriented / not applicable here.
   -cert-dcl37-c,
   -cert-dcl51-cpp
-
-# "Readability" should not break CI. Actual bug-finding should.
+ 
 WarningsAsErrors: >-
   clang-analyzer-*,
   bugprone-*,
   cert-*,
   portability-*,
   performance-*
-
-# Only treat *your* headers as "user headers" for reporting purposes.
-# This avoids diagnostics exploding from system headers pulled in by libc/Windows.
 HeaderFilterRegex: '(^|/)(wordcount|wc_.*)\.h$'
 SystemHeaders: false
-
 FormatStyle: file
