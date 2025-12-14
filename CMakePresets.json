@@ -1,25 +1,26 @@
 {
-  "version": 4,
+  "version": 2,
   "cmakeMinimumRequired": {
-    "major": 4,
-    "minor": 2,
-    "patch": 1
+    "major": 3,
+    "minor": 20,
+    "patch": 0
   },
   "configurePresets": [
     {
       "name": "base",
       "hidden": true,
       "generator": "Ninja",
-      "binaryDir": "${sourceDir}/build-${presetName}",
+      "binaryDir": "${sourceDir}/build/${presetName}",
       "cacheVariables": {
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-        "CMAKE_BUILD_TYPE": "Debug"
+        "CMAKE_BUILD_TYPE": "Debug",
+        "WC_WERROR": "OFF"
       }
     },
     {
       "name": "clang",
       "inherits": "base",
-      "displayName": "Clang + Sanitizers",
+      "displayName": "Clang (Debug + ASan/UBSan)",
       "cacheVariables": {
         "CMAKE_C_COMPILER": "clang",
         "ENABLE_SANITIZERS": "ON"
@@ -28,60 +29,53 @@
     {
       "name": "gcc",
       "inherits": "base",
-      "displayName": "GCC + Sanitizers",
+      "displayName": "GCC (Debug + ASan/UBSan)",
       "cacheVariables": {
         "CMAKE_C_COMPILER": "gcc",
         "ENABLE_SANITIZERS": "ON"
       }
     },
     {
-      "name": "tcc",
+      "name": "compcert",
       "inherits": "base",
-      "displayName": "TinyCC",
+      "displayName": "CompCert (ccomp, no sanitizers)",
       "cacheVariables": {
-        "CMAKE_C_COMPILER": "tcc",
+        "CMAKE_C_COMPILER": "ccomp",
         "ENABLE_SANITIZERS": "OFF"
       }
     },
     {
       "name": "mingw",
       "inherits": "base",
-      "displayName": "MinGW Windows Cross",
+      "displayName": "MinGW-w64 Windows cross (static exe)",
       "cacheVariables": {
-        "CMAKE_SYSTEM_NAME": "Windows",
-        "CMAKE_C_COMPILER": "x86_64-w64-mingw32-gcc",
-        "CMAKE_RC_COMPILER": "x86_64-w64-mingw32-windres",
-        "ENABLE_SANITIZERS": "OFF"
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/mingw-w64.cmake",
+        "ENABLE_SANITIZERS": "OFF",
+        "WC_MINGW_STATIC": "ON"
       }
     }
   ],
   "buildPresets": [
-    { "name": "clang", "configurePreset": "clang" },
-    { "name": "gcc", "configurePreset": "gcc" },
-    { "name": "tcc", "configurePreset": "tcc" },
-    { "name": "mingw", "configurePreset": "mingw" }
+    { "name": "clang",    "configurePreset": "clang" },
+    { "name": "gcc",      "configurePreset": "gcc" },
+    { "name": "compcert", "configurePreset": "compcert" },
+    { "name": "mingw",    "configurePreset": "mingw" }
   ],
   "testPresets": [
     {
       "name": "clang",
       "configurePreset": "clang",
-      "output": {
-       "outputOnFailure": false
-      }
+      "output": { "outputOnFailure": true }
     },
     {
       "name": "gcc",
       "configurePreset": "gcc",
-      "output": {
-        "outputOnFailure": false
-      }
+      "output": { "outputOnFailure": true }
     },
     {
-      "name": "tcc",
-      "configurePreset": "tcc",
-      "output": {
-        "outputOnFailure": false
-      }
+      "name": "compcert",
+      "configurePreset": "compcert",
+      "output": { "outputOnFailure": true }
     }
   ]
 }

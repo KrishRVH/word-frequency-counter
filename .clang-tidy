@@ -1,26 +1,61 @@
 ---
+# clang-tidy configuration tuned for a small, defensive C99 library.
+#
+# Philosophy:
+#   - Treat "this can be wrong" diagnostics as errors (analyzer/bugprone/cert/etc.)
+#   - Keep pure readability/style as non-fatal guidance (still reported)
+#   - Avoid noise from system headers
+
 Checks: >-
   -*,
+
+  # Core bug finding / correctness
   clang-analyzer-*,
   bugprone-*,
-  portability-*,
   cert-*,
-  misc-redundant-expression,
+  portability-*,
+  performance-*,
+
+  # Targeted style rule you explicitly want enforced
   readability-isolate-declaration,
+
+  # High-signal misc check
+  misc-redundant-expression,
+
+  # --- Explicit exclusions (project policy / false positives / intent) ---
   -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling,
+
+  # Naming / API style: you intentionally use leading underscores / C idioms in places.
   -bugprone-reserved-identifier,
+
+  # Benign in C APIs and often conflicts with readability preferences.
   -bugprone-easily-swappable-parameters,
+
+  # Intentional patterns:
   -bugprone-assignment-in-if-condition,
+
+  # Your code is explicitly careful about casts/limits; this tends to be noisy.
   -bugprone-narrowing-conversions,
   -bugprone-multi-level-implicit-pointer-conversion,
+
+  # You intentionally prefer sizeof(*ptr) allocation idiom; keep this off.
   -bugprone-sizeof-expression,
+
+  # CERT checks that are C++-oriented / not applicable here.
   -cert-dcl37-c,
   -cert-dcl51-cpp
 
-# Additional exclusions rationale:
-#   - multi-level-implicit-pointer-conversion: C allows void* <-> T** implicitly; idiomatic for malloc/calloc/free
-#   - sizeof-expression: sizeof(*ptr) pattern is correct and preferred for allocations
+# "Readability" should not break CI. Actual bug-finding should.
+WarningsAsErrors: >-
+  clang-analyzer-*,
+  bugprone-*,
+  cert-*,
+  portability-*,
+  performance-*
 
-WarningsAsErrors: '*'
-HeaderFilterRegex: '.*'
+# Only treat *your* headers as "user headers" for reporting purposes.
+# This avoids diagnostics exploding from system headers pulled in by libc/Windows.
+HeaderFilterRegex: '(^|/)(wordcount|wc_.*)\.h$'
+SystemHeaders: false
+
 FormatStyle: file

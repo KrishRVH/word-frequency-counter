@@ -1,20 +1,23 @@
 # ----------------------------------------------
-# mingw-w64.cmake – cross‑compile for Windows
+# mingw-w64.cmake – cross-compile for Windows
 # ----------------------------------------------
 set(CMAKE_SYSTEM_NAME Windows)
-set(CMAKE_SYSTEM_PROCESSOR AMD64)
+set(CMAKE_SYSTEM_PROCESSOR x86_64)
 
-# Choose the GCC or Clang variant:
-#   GCC:   x86_64-w64-mingw32-
-#   Clang: x86_64-w64-mingw32-clang
-set(TOOLCHAIN_PREFIX "x86_64-w64-mingw32-")   # <-- edit if you prefer clang
+# Toolchain triplet (no trailing dash)
+set(TOOLCHAIN_TRIPLET "x86_64-w64-mingw32")
 
-set(CMAKE_C_COMPILER   "${TOOLCHAIN_PREFIX}gcc")
-set(CMAKE_CXX_COMPILER "${TOOLCHAIN_PREFIX}g++")
-set(CMAKE_RC_COMPILER  "${TOOLCHAIN_PREFIX}windres")
-set(CMAKE_FIND_ROOT_PATH  /usr/${TOOLCHAIN_PREFIX})
+# Compilers
+set(CMAKE_C_COMPILER   "${TOOLCHAIN_TRIPLET}-gcc")
+set(CMAKE_CXX_COMPILER "${TOOLCHAIN_TRIPLET}-g++")
+set(CMAKE_RC_COMPILER  "${TOOLCHAIN_TRIPLET}-windres")
 
-# Prevent CMake from searching the host system for libs/executables
+# Root for finding headers/libs
+set(CMAKE_FIND_ROOT_PATH "/usr/${TOOLCHAIN_TRIPLET}")
+
+# Don't try to run executables during try_compile for cross builds
+set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+
 set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
 set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)

@@ -3,7 +3,7 @@
 # Emphasizes readability and consistency for C codebases
 
 BasedOnStyle: LLVM
-Language: Cpp  # clang-format uses Cpp for C as well
+Language: Cpp  # clang-format uses Cpp mode for C as well
 InsertNewlineAtEOF: true
 
 # --- Indentation and width ---
@@ -80,6 +80,9 @@ SeparateDefinitionBlocks: Leave
 # --- Miscellaneous ---
 Cpp11BracedListStyle: false
 BreakStringLiterals: true
-ReflowComments: true
+
+# Preserve hand-formatted DESIGN blocks / tables / ASCII layouts.
+ReflowComments: false
+
 InsertBraces: false
 RemoveBracesLLVM: false
