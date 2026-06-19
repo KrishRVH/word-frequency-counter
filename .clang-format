@@ -80,6 +80,9 @@ SeparateDefinitionBlocks: Leave
 # --- Miscellaneous ---
 Cpp11BracedListStyle: false
 BreakStringLiterals: true
-ReflowComments: true
+
+# Preserve hand-formatted DESIGN blocks / tables / ASCII layouts.
+ReflowComments: false
+
 InsertBraces: false
 RemoveBracesLLVM: false

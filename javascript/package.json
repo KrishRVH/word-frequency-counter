@@ -1,0 +1,23 @@
+{
+  "name": "word-frequency-counter-javascript",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "format:check": "prettier . --check",
+    "format:fix": "prettier . --write --cache --list-different",
+    "lint:check": "eslint . --max-warnings 0",
+    "standards:check": "bun run lint:check && bun run typecheck && bun run format:check",
+    "typecheck": "tsc --pretty --noEmit -p tsconfig.json",
+    "wordcount": "node src/wordcount.js"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.0.0",
+    "eslint": "^10.4.0",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^17.6.0",
+    "prettier": "^3.8.4",
+    "typescript": "^6.0.3"
+  }
+}

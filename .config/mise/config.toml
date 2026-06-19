@@ -1,0 +1,141 @@
+[settings]
+lockfile = true
+
+[env]
+LANG = "C.UTF-8"
+LC_ALL = "C.UTF-8"
+WFC_MAX_WORD = "1024"
+WFC_TOP = "10"
+WFC_FIXTURE = "fixtures/spec.txt"
+
+[tools]
+bun = "1.3.14"
+cabal = "3.16.1.0"
+clang = "22.1.8"
+cmake = "4.3.4"
+dotnet = "10.0.301"
+elixir = "1.20.1-otp-29"
+erlang = "29.0.2"
+go = "1.26.4"
+gofumpt = "0.10.0"
+golangci-lint = "2.12.2"
+gradle = "9.6.0"
+ghcup = "0.2.6.2"
+hlint = "3.10"
+java = "26.0.1"
+kotlin = "2.4.0"
+ktlint = "1.8.0"
+lua = "5.5.0"
+lua-language-server = "3.18.2"
+ninja = "1.13.2"
+node = "26.3.1"
+php = "8.5.7"
+prettier = "3.8.4"
+rebar = "3.27.0"
+ormolu = "0.8.1.1"
+rust = "1.96.0"
+stylua = "2.5.2"
+taplo = "0.10.0"
+zig = "0.16.0"
+"go:golang.org/x/vuln/cmd/govulncheck" = "1.4.0"
+"conda:clangxx" = "22.1.8"
+"conda:clang-tools" = "22.1.8"
+
+[tasks.install]
+description = "Install pinned project tools"
+run = "mise install"
+
+[tasks.tasks]
+description = "List available project tasks"
+run = "mise tasks"
+
+[tasks.fmt]
+description = "Format all maintained sources"
+run = """
+clang_format="$(mise where conda:clang-tools)/bin/clang-format"
+"$clang_format" -i c/include/*.h c/src/*.c cpp/src/*.cpp
+cargo fmt --manifest-path rust/Cargo.toml --all
+(cd go && gofumpt -w .)
+prettier --write --cache --list-different README.md scripts/*.ts
+(cd javascript && bun install --frozen-lockfile && bun run format:fix)
+(cd php && composer install --quiet --no-interaction && composer normalize && composer fmt)
+stylua lua
+dotnet format csharp/src/WordFrequencyCounter/WordFrequencyCounter.csproj
+ktlint -F 'kotlin/**/*.kt' 'kotlin/**/*.kts'
+(cd elixir && mix format)
+ormolu --mode inplace haskell/app/Main.hs
+zig fmt zig/src/*.zig
+taplo format .config/mise/config.toml
+"""
+
+[tasks."fmt:check"]
+description = "Check formatting"
+run = """
+clang_format="$(mise where conda:clang-tools)/bin/clang-format"
+"$clang_format" --dry-run --Werror c/include/*.h c/src/*.c cpp/src/*.cpp
+cargo fmt --manifest-path rust/Cargo.toml --all -- --check
+(cd go && test -z "$(gofumpt -l .)")
+prettier --check README.md scripts/*.ts
+(cd javascript && bun install --frozen-lockfile && bun run format:check)
+(cd php && composer install --quiet --no-interaction && composer normalize:check && composer phpcs)
+stylua --check lua
+dotnet format csharp/src/WordFrequencyCounter/WordFrequencyCounter.csproj --verify-no-changes
+ktlint 'kotlin/**/*.kt' 'kotlin/**/*.kts'
+(cd elixir && mix format --check-formatted)
+ormolu --mode check haskell/app/Main.hs
+zig fmt --check zig/src/*.zig
+taplo format --check .config/mise/config.toml
+"""
+
+[tasks.lint]
+description = "Run static checks without executing correctness tests"
+run = """
+cmake --fresh --preset clang
+cmake --build --preset clang
+clang_tidy_resource="$(mise where conda:clangxx)/lib/clang/22"
+clang-tidy --extra-arg=-resource-dir="$clang_tidy_resource" c/src/wordfreq.c c/src/main.c cpp/src/main.cpp -p build/c/clang
+cargo clippy --manifest-path rust/Cargo.toml --all-targets --all-features -- -D warnings
+(cd go && go vet ./... && golangci-lint run ./... && govulncheck ./...)
+(cd javascript && bun install --frozen-lockfile && bun run lint:check && bun run typecheck && node --check src/wordcount.js)
+(cd php && composer install --quiet --no-interaction && composer check)
+dotnet build csharp/src/WordFrequencyCounter/WordFrequencyCounter.csproj -warnaserror
+mise x lua@5.4.8 -- sh -lc '
+  if [ ! -x .lua_modules54/bin/luacheck ]; then
+    luarocks --tree .lua_modules54 install luacheck
+  fi
+  eval "$(luarocks --tree .lua_modules54 path)"
+  luacheck --exclude-files .lua_modules54/** -- lua
+'
+lua-language-server --check=lua --checklevel=Error
+(cd kotlin && mise x java@22.0.2 -- gradle detekt --no-daemon && gradle classes --no-daemon)
+(cd elixir && mix deps.get && mix credo --strict && mix compile --warnings-as-errors)
+hlint haskell/app
+ghcup run --install --ghc 9.14.1 -- ghc -Wall -Werror -fno-code haskell/app/Main.hs
+(cd haskell && cabal check && ghcup run --install --ghc 9.14.1 -- cabal build all --ghc-options=-Werror)
+zig build-exe -fno-emit-bin zig/src/main.zig
+bun build scripts/bench.ts --target=bun --outfile=build/check/bench.js
+"""
+
+[tasks.build]
+description = "Build all compiled implementations"
+run = "bun scripts/bench.ts --build-only"
+
+[tasks.validate]
+description = "Validate implementations against tokenfreq-c99"
+run = "bun scripts/bench.ts --validate --runs=1"
+
+[tasks.bench]
+description = "Build, validate, and benchmark implementations"
+run = "bun scripts/bench.ts"
+
+[tasks."check:local"]
+description = "Run local format, lint, build, and oracle validation"
+depends = ["fmt:check", "lint", "validate"]
+
+[tasks.check]
+description = "Alias for local checks"
+depends = ["check:local"]
+
+[tasks.clean]
+description = "Remove generated build output"
+run = "rm -rf build rust/target go/bin javascript/node_modules javascript/.tsbuildinfo php/vendor php/.psalm-cache php/.rector-cache php/.phpstan.cache php/.pdepend php/.deptrac.cache csharp/src/WordFrequencyCounter/bin csharp/src/WordFrequencyCounter/obj kotlin/.gradle kotlin/.kotlin kotlin/build elixir/_build elixir/deps elixir/word_count haskell/dist-newstyle .lua_modules .lua_modules54 .zig-cache zig-out"

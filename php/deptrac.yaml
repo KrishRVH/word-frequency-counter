@@ -1,0 +1,12 @@
+deptrac:
+  paths:
+    - ./src
+
+  layers:
+    - name: Domain
+      collectors:
+        - type: classLike
+          value: ^WordFrequencyCounter\\(Cli|CliOptions|CliOptionValue|Entry|Result|WordCounter)$
+
+  ruleset:
+    Domain: []

@@ -1,0 +1,9 @@
+parameters:
+	level: 10
+	paths:
+		- src
+		- bin/wordcount
+	treatPhpDocTypesAsCertain: true
+
+includes:
+	- vendor/phpstan/phpstan-strict-rules/rules.neon

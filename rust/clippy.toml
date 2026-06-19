@@ -1,0 +1,7 @@
+cognitive-complexity-threshold = 30
+enum-variant-size-threshold = 200
+excessive-nesting-threshold = 5
+max-fn-params-bools = 3
+single-char-binding-names-threshold = 5
+too-many-arguments-threshold = 7
+too-many-lines-threshold = 100

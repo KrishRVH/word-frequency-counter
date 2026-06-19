@@ -1,0 +1,16 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+require __DIR__ . '/../src/CliOptions.php';
+require __DIR__ . '/../src/CliOptionValue.php';
+require __DIR__ . '/../src/Cli.php';
+require __DIR__ . '/../src/Entry.php';
+require __DIR__ . '/../src/Result.php';
+require __DIR__ . '/../src/WordCounter.php';
+
+use WordFrequencyCounter\Cli;
+
+// phpcs:disable Generic.PHP.ForbiddenFunctions.Found, SlevomatCodingStandard.Variables.DisallowSuperGlobalVariable.DisallowedSuperGlobalVariable
+exit(Cli::main(Cli::normalizeArguments($_SERVER['argv'] ?? []), STDOUT, STDERR));

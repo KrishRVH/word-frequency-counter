@@ -1,0 +1,200 @@
+# Normalize text files to LF by default. Override only where a platform format is
+# required for execution.
+* text=auto eol=lf
+
+# Shell and platform scripts
+*.sh text eol=lf
+*.bash text eol=lf
+*.zsh text eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Source
+*.c text
+*.h text
+*.cc text
+*.cpp text
+*.cxx text
+*.hh text
+*.hpp text
+*.hxx text
+*.cs text diff=csharp
+*.cshtml text
+*.csx text diff=csharp
+*.fs text
+*.fsi text
+*.fsx text
+*.razor text
+*.vb text
+*.xaml text
+*.js text
+*.jsx text
+*.cjs text
+*.mjs text
+*.ts text
+*.tsx text
+*.cts text
+*.mts text
+*.lua text
+*.php text diff=php
+*.rs text
+*.zig text
+*.hs text
+*.cabal text
+*.kt text
+*.kts text
+*.ex text
+*.exs text
+
+# Build/config
+*.cmake text
+CMakeLists.txt text
+Makefile text
+*.mk text
+*.csproj text
+*.cfg text
+*.conf text
+*.dist text
+*.editorconfig text
+*.env.example text
+*.env.sample text
+*.env.template text
+*.gitignore text
+*.gitattributes text
+*.ini text
+*.json text
+*.json5 text
+*.jsonc text
+*.lock text
+*.neon text
+*.nuspec text
+*.proj text
+*.projitems text
+*.props text
+*.resx text
+*.ruleset text
+*.shproj text
+*.sln text
+*.slnf text
+*.slnx text
+*.targets text
+*.toml text
+*.vbproj text
+*.vcxproj.filters text
+*.vsct text
+*.vsixmanifest text
+*.xml text
+*.yaml text
+*.yml text
+
+# Docs/data
+*.csv text
+*.md text diff=markdown
+*.sql text
+*.txt text
+
+# GitHub Linguist
+#
+# Count maintained implementations, not repository plumbing. These attributes
+# keep GitHub's language bar representative of the actual language comparison:
+# implementation source is detectable, while manifests, locks, docs, fixtures,
+# generated files, and tool configuration stay out of the language totals.
+*.md linguist-documentation=true linguist-detectable=false
+LICENSE linguist-documentation=true linguist-detectable=false
+AGENTS.md linguist-documentation=true linguist-detectable=false
+README.md linguist-documentation=true linguist-detectable=false
+fixtures/** linguist-detectable=false
+scripts/** linguist-detectable=false
+
+.config/** linguist-detectable=false
+.config/mise/mise.lock linguist-generated=true linguist-detectable=false
+.clang-format linguist-detectable=false
+.clang-tidy linguist-detectable=false
+.editorconfig linguist-detectable=false
+.gitattributes linguist-detectable=false
+.gitignore linguist-detectable=false
+.luacheckrc linguist-detectable=false
+CMakeLists.txt linguist-detectable=false
+CMakePresets.json linguist-detectable=false
+
+build/** linguist-generated=true linguist-detectable=false
+dist/** linguist-generated=true linguist-detectable=false
+out/** linguist-generated=true linguist-detectable=false
+coverage/** linguist-generated=true linguist-detectable=false
+**/bin/** linguist-generated=true linguist-detectable=false
+**/obj/** linguist-generated=true linguist-detectable=false
+php/bin/wordcount -linguist-generated -linguist-detectable linguist-language=PHP
+lua/bin/** -linguist-generated -linguist-detectable
+
+javascript/node_modules/** linguist-vendored=true linguist-detectable=false
+php/vendor/** linguist-vendored=true linguist-detectable=false
+elixir/deps/** linguist-vendored=true linguist-detectable=false
+
+*.lock linguist-generated=true linguist-detectable=false
+go/go.mod linguist-detectable=false
+go/go.sum linguist-generated=true linguist-detectable=false
+go/.golangci.yml linguist-detectable=false
+rust/Cargo.toml linguist-detectable=false
+rust/Cargo.lock linguist-generated=true linguist-detectable=false
+rust/clippy.toml linguist-detectable=false
+rust/rustfmt.toml linguist-detectable=false
+javascript/package.json linguist-detectable=false
+javascript/eslint.config.mjs linguist-detectable=false
+javascript/tsconfig.json linguist-detectable=false
+php/composer.json linguist-detectable=false
+php/composer.lock linguist-generated=true linguist-detectable=false
+php/deptrac.yaml linguist-detectable=false
+php/phpcs.xml linguist-detectable=false
+php/phpmd.xml linguist-detectable=false
+php/phpstan.neon linguist-detectable=false
+php/psalm.xml linguist-detectable=false
+php/rector.php linguist-detectable=false
+csharp/**/*.csproj linguist-detectable=false
+lua/stylua.toml linguist-detectable=false
+elixir/.formatter.exs linguist-detectable=false
+elixir/mix.exs linguist-detectable=false
+haskell/*.cabal linguist-detectable=false
+kotlin/**/*.kts linguist-detectable=false
+kotlin/gradle.lockfile linguist-generated=true linguist-detectable=false
+kotlin/gradle/** linguist-generated=true linguist-detectable=false
+
+# Binary assets/artifacts
+*.7z binary
+*.a binary
+*.avif binary
+*.db binary
+*.dll binary
+*.dylib binary
+*.exe binary
+*.gif binary
+*.gz binary
+*.ico binary
+*.icns binary
+*.jpeg binary
+*.jpg binary
+*.lib binary
+*.mp3 binary
+*.mp4 binary
+*.otf binary
+*.pdf binary
+*.pdb binary
+*.png binary
+*.nupkg binary
+*.snupkg binary
+*.so binary
+*.sqlite binary
+*.sqlite3 binary
+*.tar binary
+*.tgz binary
+*.ttf binary
+*.wasm binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.xz binary
+*.zip binary
+
+# Bun's old lockfile format is binary. `bun.lock` is text and covered by
+# `*.lock`.
+bun.lockb binary

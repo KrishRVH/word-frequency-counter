@@ -1,0 +1,28 @@
+cabal-version: 3.16
+name: word-frequency-counter-haskell
+version: 0.1.0
+synopsis: Haskell implementation of the word-frequency benchmark
+description: ASCII byte-level word-frequency counter used by the repository benchmark.
+license: MIT
+maintainer: krvh
+category: Text
+build-type: Simple
+
+common warnings
+  ghc-options:
+    -Wall
+    -Wcompat
+    -Wincomplete-record-updates
+    -Wincomplete-uni-patterns
+    -Widentities
+    -Wredundant-constraints
+
+executable wordcount-haskell
+  import: warnings
+  main-is: Main.hs
+  hs-source-dirs: app
+  default-language: GHC2024
+  build-depends:
+    base >= 4.22 && < 4.23,
+    bytestring >= 0.12 && < 0.13,
+    containers >= 0.8 && < 0.9

@@ -1,0 +1,58 @@
+[package]
+name = "word-frequency-counter-rust"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.96.0"
+license = "MIT"
+description = "ASCII byte-stream word frequency counter"
+default-run = "wordcount_rust"
+
+[[bin]]
+name = "wordcount_rust"
+path = "src/main.rs"
+
+[dependencies]
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+complexity = { level = "warn", priority = -1 }
+correctness = { level = "deny", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+perf = { level = "warn", priority = -1 }
+style = { level = "warn", priority = -1 }
+suspicious = { level = "deny", priority = -1 }
+
+cast_lossless = "allow"
+cast_possible_truncation = "allow"
+cast_possible_wrap = "allow"
+cast_precision_loss = "allow"
+cast_sign_loss = "allow"
+dbg_macro = "deny"
+expect_used = "warn"
+panic = "warn"
+todo = "warn"
+unimplemented = "warn"
+unwrap_used = "warn"
+
+cognitive_complexity = "allow"
+doc_markdown = "allow"
+missing_const_for_fn = "allow"
+module_name_repetitions = "allow"
+too_many_lines = "allow"
+uninlined_format_args = "allow"
+use_self = "allow"
+
+[profile.dev]
+overflow-checks = true
+
+[profile.release]
+codegen-units = 1
+debug = false
+lto = "fat"
+opt-level = 3
+panic = "abort"
+strip = true

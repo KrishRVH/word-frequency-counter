@@ -3,6 +3,7 @@ Checks: >-
   -*,
   clang-analyzer-*,
   bugprone-*,
+  performance-*,
   portability-*,
   cert-*,
   misc-redundant-expression,

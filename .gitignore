@@ -1,33 +1,119 @@
-# Build Systems
-/build/
-cmake-build-*/
-CMakeFiles/
-CMakeCache.txt
-cmake_install.cmake
-CTestTestfile.cmake
-Makefile
-compile_commands.json
+# Local state
+.env
+.env.*
+!.env.example
+.gstack/
+mise.local.toml
+mise.*.local.toml
+.mise.local.toml
+.mise.*.local.toml
 
-# .NET / C#
-WordCount.csproj
-bin/
-obj/
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+.tmp/
+tmp/
 
-# Language-specific binaries
-wordcount
-wordcount_c
-wordcount_hopt_t12
-wordcount_hopt_t6
-wordcount_go
-wordcount_rust
-wordcount_hopt
-wordcount_js
-wordcount_cs
-
-# IDE
-.idea/
-
-# Project artifacts
+# Generated corpora and reports
 book*.txt
 *_results.txt
-*.log
+benchmark-results.*
+
+# Generic build output
+build/
+dist/
+out/
+coverage/
+.cache/
+
+# C / CMake
+CMakeCache.txt
+CMakeFiles/
+CTestTestfile.cmake
+DartConfiguration.tcl
+cmake_install.cmake
+compile_commands.json
+*.a
+*.dll
+*.dylib
+*.exe
+*.lib
+*.o
+*.obj
+*.so
+*.dSYM/
+
+# Rust
+target/
+**/*.rs.bk
+
+# Go
+go/bin/
+
+# JavaScript / TypeScript
+node_modules/
+*.tsbuildinfo
+bun.lockb
+
+# PHP
+vendor/
+.phpunit.cache/
+.phpstan.cache/
+.psalm-cache/
+.rector-cache/
+.deptrac.cache
+.php-cs-fixer.cache
+.pdepend/
+
+# .NET
+.vs/
+artifacts/
+TestResults/
+**/[Bb]in/
+**/[Oo]bj/
+*.pdb
+*.suo
+*.user
+!lua/bin/
+!lua/bin/**
+!php/bin/
+!php/bin/**
+
+# JVM / Gradle
+.gradle/
+.kotlin/
+**/build/
+
+# Haskell
+dist-newstyle/
+*.hi
+*.dyn_hi
+*.o
+*.dyn_o
+.ghc.environment.*
+
+# Elixir / Erlang
+_build/
+deps/
+*.ez
+elixir/word_count
+
+# Zig
+.zig-cache/
+zig-cache/
+zig-out/
+
+# Lua
+.lua_modules/
+.lua_modules54/
+.luacheckcache
+*.luac
+lua_modules/
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~

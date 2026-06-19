@@ -1,0 +1,59 @@
+version: "2"
+
+run:
+  timeout: 2m
+  tests: false
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - errorlint
+    - gocognit
+    - gocritic
+    - gosec
+    - govet
+    - ineffassign
+    - misspell
+    - nilerr
+    - nilnil
+    - noctx
+    - prealloc
+    - revive
+    - staticcheck
+    - unconvert
+    - unparam
+    - unused
+    - wastedassign
+  settings:
+    gocognit:
+      min-complexity: 15
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - performance
+        - style
+      disabled-checks:
+        - commentedOutCode
+        - hugeParam
+    revive:
+      severity: error
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: early-return
+        - name: error-naming
+        - name: error-return
+        - name: error-strings
+        - name: exported
+          disabled: true
+        - name: increment-decrement
+        - name: range
+        - name: receiver-naming
+        - name: time-naming
+        - name: var-declaration
+        - name: var-naming
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
