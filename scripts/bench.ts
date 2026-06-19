@@ -24,6 +24,7 @@ type BenchOptions = {
   top: number;
   maxWord: number;
   runs: number;
+  warmups: number;
   buildOnly: boolean;
   validateOnly: boolean;
 };
@@ -38,6 +39,7 @@ type ValidationCase = {
 const root = resolve(import.meta.dir, "..");
 const buildBin = join(root, "build", "bin");
 const validationFixtures = join(root, "build", "fixtures");
+const startupFixture = join(validationFixtures, "startup-empty.txt");
 const haskellBuild = join(root, "build", "haskell");
 const tokenfreqRoot = join(homedir(), "dev/personal/tokenfreq-c99");
 const defaultOracle = join(tokenfreqRoot, "build/clang/wc");
@@ -309,6 +311,7 @@ const options = parseArgs(process.argv.slice(2));
 mkdirSync(buildBin, { recursive: true });
 mkdirSync(validationFixtures, { recursive: true });
 mkdirSync(haskellBuild, { recursive: true });
+writeFileSync(startupFixture, "");
 
 await ensureOracle();
 await buildAll();
@@ -347,6 +350,7 @@ if (!options.buildOnly) {
           options.top,
           options.maxWord,
           options.runs,
+          options.warmups,
         );
     rows.push({ name: implementation.name, status: "ok", meanMs });
   }
@@ -360,6 +364,7 @@ function parseArgs(args: string[]): BenchOptions {
     top: parseDecimal(process.env.WFC_TOP ?? "10", "WFC_TOP"),
     maxWord: parseDecimal(process.env.WFC_MAX_WORD ?? "1024", "WFC_MAX_WORD"),
     runs: 5,
+    warmups: parseDecimal(process.env.WFC_WARMUPS ?? "3", "WFC_WARMUPS"),
     buildOnly: false,
     validateOnly: false,
   };
@@ -378,6 +383,11 @@ function parseArgs(args: string[]): BenchOptions {
       );
     else if (arg.startsWith("--runs="))
       parsed.runs = parseDecimal(arg.slice("--runs=".length), "--runs");
+    else if (arg.startsWith("--warmups="))
+      parsed.warmups = parseDecimal(
+        arg.slice("--warmups=".length),
+        "--warmups",
+      );
     else throw new Error(`unknown option: ${arg}`);
   }
 
@@ -549,15 +559,29 @@ async function benchmark(
   top: number,
   maxWord: number,
   runs: number,
+  warmups: number,
 ): Promise<number> {
   const samples: number[] = [];
   const command = implementation.run(fixture, top, maxWord);
-  for (let index = 0; index < runs; index += 1) {
-    const started = performance.now();
+  const startupCommand = implementation.run(startupFixture, 1, 4);
+
+  for (let index = 0; index < warmups; index += 1) {
     await run(command);
-    samples.push(performance.now() - started);
+    await run(startupCommand);
+  }
+
+  for (let index = 0; index < runs; index += 1) {
+    const totalMs = await timeRun(command);
+    const startupMs = await timeRun(startupCommand);
+    samples.push(Math.max(0, totalMs - startupMs));
   }
   return samples.reduce((sum, sample) => sum + sample, 0) / samples.length;
+}
+
+async function timeRun(command: Command): Promise<number> {
+  const started = performance.now();
+  await run(command);
+  return performance.now() - started;
 }
 
 function assertSame(name: string, expected: JsonResult, actual: JsonResult) {
@@ -573,9 +597,25 @@ function assertSame(name: string, expected: JsonResult, actual: JsonResult) {
 function printSummary(
   rows: { name: string; status: string; meanMs?: number }[],
 ) {
-  console.log("| implementation | status | mean ms |");
+  const hasMeans = rows.some((row) => row.meanMs !== undefined);
+  if (!hasMeans) {
+    console.log("| implementation | status |");
+    console.log("|---|---:|");
+    for (const row of rows) {
+      console.log(`| ${row.name} | ${row.status} |`);
+    }
+    return;
+  }
+
+  const displayRows = [...rows].sort(
+    (left, right) =>
+      (left.meanMs ?? Number.POSITIVE_INFINITY) -
+      (right.meanMs ?? Number.POSITIVE_INFINITY),
+  );
+
+  console.log("| implementation | status | mean ms (startup-adjusted) |");
   console.log("|---|---:|---:|");
-  for (const row of rows) {
+  for (const row of displayRows) {
     console.log(
       `| ${row.name} | ${row.status} | ${row.meanMs === undefined ? "" : row.meanMs.toFixed(3)} |`,
     );

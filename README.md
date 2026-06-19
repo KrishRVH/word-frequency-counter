@@ -67,11 +67,11 @@ The oracle emits a slightly different shape, so `scripts/bench.ts` normalizes
 | C++26      | single CLI                             | Modern standard-library version: `std::from_chars`, `std::unordered_map`, vectors, and ranges sorting without turning the solution into a framework.                                                      |
 | Rust 2024  | library plus CLI                       | Small ownership-conscious core over `&[u8]`, `HashMap`, and explicit render functions. It is one of the cleanest balances of safety, speed, and readability here.                                         |
 | Go         | `internal/wordcount` plus command      | Streams through a buffered reader instead of slurping the file. The package boundary is natural Go, and the code stays deliberately boring.                                                               |
-| JavaScript | ESM CLI with `checkJs`                 | Uses `Uint8Array`, `Map`, and explicit ASCII helpers. The implementation is readable, but string accumulation and Node startup are visible in the benchmark.                                              |
+| JavaScript | ESM CLI with `checkJs`                 | Uses `Uint8Array`, `Map`, and explicit ASCII helpers. The implementation is readable, with string accumulation still visible once startup is removed from the benchmark.                                  |
 | PHP        | Composer package plus thin bin wrapper | The most standards-heavy dynamic implementation: strict types, value objects, PHPCS, PHPMD, PHPStan, Psalm, Deptrac, and Rector dry-run. The code is more formal because the quality gate is more formal. |
-| C#         | .NET console app                       | Streams through `FileStream` in chunks and carries scanner state in an accumulator. The core is sensible C#, but this benchmark includes `dotnet run --no-build` startup cost.                            |
+| C#         | .NET console app                       | Streams through `FileStream` in chunks and carries scanner state in an accumulator. The core is sensible C# and the benchmark now subtracts the .NET command startup baseline.                            |
 | Lua        | module plus executable script          | Compact table-based scanner with a small CLI wrapper. It is a good example of Lua being direct without pretending to be a static language.                                                                |
-| Kotlin     | Gradle JVM app                         | Uses a byte array, `StringBuilder`, unsigned counts, and locked Gradle tooling. The implementation is clear, while JVM process startup dominates the small fixture timing.                                |
+| Kotlin     | Gradle JVM app                         | Uses a byte array, `StringBuilder`, unsigned counts, and locked Gradle tooling. The implementation is clear, and the benchmark subtracts the JVM command startup baseline.                                |
 | Elixir     | Mix escript                            | Expresses the scanner as a reducer over bytes with immutable maps. It is elegant BEAM code for the problem, not a claim that BEAM is ideal for tiny byte-counting CLIs.                                   |
 | Zig        | single native CLI                      | Explicit allocator ownership, arena lifetime, `StringHashMap`, and low ceremony. Zig ended up as the final advisory language because it makes the byte-level mechanics visible without C's footguns.      |
 | Haskell    | GHC-built CLI                          | Strict `ByteString` fold into `Data.Map.Strict`, with pure parse/render/counting pieces. It is surprisingly competitive for a high-level implementation once compiled native.                             |
@@ -84,26 +84,27 @@ Last local run:
 mise run bench -- --runs=3
 ```
 
-| Implementation | Status | Mean ms |
-| -------------- | -----: | ------: |
-| C              |     ok |   0.574 |
-| Zig            |     ok |   0.602 |
-| Rust           |     ok |   0.610 |
-| Lua            |     ok |   0.863 |
-| C++            |     ok |   0.967 |
-| Haskell        |     ok |   1.097 |
-| Go             |     ok |   1.602 |
-| PHP            |     ok |   8.605 |
-| JavaScript     |     ok |  15.905 |
-| Kotlin         |     ok |  57.377 |
-| Elixir         |     ok | 221.132 |
-| C#             |     ok | 388.563 |
+| Implementation | Status | Mean ms (startup-adjusted) |
+| -------------- | -----: | -------------------------: |
+| Zig            |     ok |                      0.013 |
+| Rust           |     ok |                      0.020 |
+| C              |     ok |                      0.021 |
+| Go             |     ok |                      0.030 |
+| Haskell        |     ok |                      0.033 |
+| C++            |     ok |                      0.043 |
+| Lua            |     ok |                      0.046 |
+| PHP            |     ok |                      0.060 |
+| JavaScript     |     ok |                      0.445 |
+| Kotlin         |     ok |                      4.246 |
+| Elixir         |     ok |                      5.828 |
+| C#             |     ok |                     21.325 |
 
-Interpret these numbers as whole-command timings, not as pure inner-loop
-microbenchmarks. The harness builds first, validates against `tokenfreq-c99`,
-then times each implementation by spawning its CLI. That makes startup cost part
-of the result, which is why native binaries cluster tightly and JVM, BEAM, and
-.NET look much slower on the small fixture.
+Interpret these numbers as startup-adjusted implementation timings, not
+whole-command timings. The harness builds first, validates against
+`tokenfreq-c99`, runs warmups for every implementation, then times both the
+requested fixture and an empty-fixture invocation for the same command. The
+reported mean subtracts that empty-fixture baseline so runtime and process
+startup do not dominate the language comparison.
 
 ## Commands
 
@@ -125,7 +126,7 @@ mise run clean
 Useful benchmark options:
 
 ```sh
-mise run bench -- --fixture=fixtures/spec.txt --top=10 --max-word=1024 --runs=5
+mise run bench -- --fixture=fixtures/spec.txt --top=10 --max-word=1024 --runs=5 --warmups=3
 mise run validate
 ```
 

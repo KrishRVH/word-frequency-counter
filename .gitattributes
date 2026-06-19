@@ -96,19 +96,17 @@ Makefile text
 
 # GitHub Linguist
 #
-# Count maintained implementations, not repository plumbing. These attributes
-# keep GitHub's language bar representative of the actual language comparison:
-# implementation source is detectable, while manifests, locks, docs, fixtures,
-# generated files, and tool configuration stay out of the language totals.
-*.md linguist-documentation=true linguist-detectable=false
-LICENSE linguist-documentation=true linguist-detectable=false
-AGENTS.md linguist-documentation=true linguist-detectable=false
-README.md linguist-documentation=true linguist-detectable=false
-fixtures/** linguist-detectable=false
+# Keep the language bar focused on the benchmark implementations. Root plumbing
+# is excluded, generated and vendored mass stays hidden, and language-scoped
+# manifests count toward their implementation instead of falling into "Other".
+*.md linguist-documentation=true
+LICENSE linguist-documentation=true
+AGENTS.md linguist-documentation=true
+README.md linguist-documentation=true
+fixtures/** linguist-documentation=true
 scripts/** linguist-detectable=false
 
 .config/** linguist-detectable=false
-.config/mise/mise.lock linguist-generated=true linguist-detectable=false
 .clang-format linguist-detectable=false
 .clang-tidy linguist-detectable=false
 .editorconfig linguist-detectable=false
@@ -118,46 +116,57 @@ scripts/** linguist-detectable=false
 CMakeLists.txt linguist-detectable=false
 CMakePresets.json linguist-detectable=false
 
-build/** linguist-generated=true linguist-detectable=false
-dist/** linguist-generated=true linguist-detectable=false
-out/** linguist-generated=true linguist-detectable=false
-coverage/** linguist-generated=true linguist-detectable=false
-**/bin/** linguist-generated=true linguist-detectable=false
-**/obj/** linguist-generated=true linguist-detectable=false
-php/bin/wordcount -linguist-generated -linguist-detectable linguist-language=PHP
-lua/bin/** -linguist-generated -linguist-detectable
+build/** linguist-generated=true
+dist/** linguist-generated=true
+out/** linguist-generated=true
+coverage/** linguist-generated=true
+rust/target/** linguist-generated=true
+go/bin/** linguist-generated=true
+csharp/**/bin/** linguist-generated=true
+csharp/**/obj/** linguist-generated=true
+kotlin/build/** linguist-generated=true
+kotlin/.gradle/** linguist-generated=true
+kotlin/.kotlin/** linguist-generated=true
+elixir/_build/** linguist-generated=true
+elixir/word_count linguist-generated=true
+haskell/dist-newstyle/** linguist-generated=true
+.zig-cache/** linguist-generated=true
+zig-out/** linguist-generated=true
 
-javascript/node_modules/** linguist-vendored=true linguist-detectable=false
-php/vendor/** linguist-vendored=true linguist-detectable=false
-elixir/deps/** linguist-vendored=true linguist-detectable=false
+javascript/node_modules/** linguist-vendored=true
+php/vendor/** linguist-vendored=true
+elixir/deps/** linguist-vendored=true
+.lua_modules/** linguist-vendored=true
+.lua_modules54/** linguist-vendored=true
 
-*.lock linguist-generated=true linguist-detectable=false
-go/go.mod linguist-detectable=false
-go/go.sum linguist-generated=true linguist-detectable=false
-go/.golangci.yml linguist-detectable=false
-rust/Cargo.toml linguist-detectable=false
-rust/Cargo.lock linguist-generated=true linguist-detectable=false
-rust/clippy.toml linguist-detectable=false
-rust/rustfmt.toml linguist-detectable=false
-javascript/package.json linguist-detectable=false
-javascript/eslint.config.mjs linguist-detectable=false
-javascript/tsconfig.json linguist-detectable=false
-php/composer.json linguist-detectable=false
-php/composer.lock linguist-generated=true linguist-detectable=false
-php/deptrac.yaml linguist-detectable=false
-php/phpcs.xml linguist-detectable=false
-php/phpmd.xml linguist-detectable=false
-php/phpstan.neon linguist-detectable=false
-php/psalm.xml linguist-detectable=false
-php/rector.php linguist-detectable=false
-csharp/**/*.csproj linguist-detectable=false
-lua/stylua.toml linguist-detectable=false
-elixir/.formatter.exs linguist-detectable=false
-elixir/mix.exs linguist-detectable=false
-haskell/*.cabal linguist-detectable=false
-kotlin/**/*.kts linguist-detectable=false
-kotlin/gradle.lockfile linguist-generated=true linguist-detectable=false
-kotlin/gradle/** linguist-generated=true linguist-detectable=false
+*.lock linguist-generated=true
+go/go.sum linguist-generated=true
+kotlin/gradle.lockfile linguist-generated=true
+kotlin/gradle/** linguist-generated=true
+
+go/go.mod linguist-language=Go
+go/.golangci.yml linguist-language=Go
+rust/Cargo.toml linguist-language=Rust
+rust/clippy.toml linguist-language=Rust
+rust/rustfmt.toml linguist-language=Rust
+javascript/package.json linguist-language=JavaScript
+javascript/eslint.config.mjs linguist-language=JavaScript
+javascript/tsconfig.json linguist-language=JavaScript
+php/composer.json linguist-language=PHP
+php/deptrac.yaml linguist-language=PHP
+php/phpcs.xml linguist-language=PHP
+php/phpmd.xml linguist-language=PHP
+php/phpstan.neon linguist-language=PHP
+php/psalm.xml linguist-language=PHP
+php/rector.php linguist-language=PHP
+php/bin/wordcount linguist-language=PHP
+csharp/**/*.csproj linguist-language=C#
+lua/stylua.toml linguist-language=Lua
+lua/bin/wordcount.lua linguist-language=Lua
+elixir/.formatter.exs linguist-language=Elixir
+elixir/mix.exs linguist-language=Elixir
+haskell/*.cabal linguist-language=Haskell
+kotlin/**/*.kts linguist-language=Kotlin
 
 # Binary assets/artifacts
 *.7z binary
