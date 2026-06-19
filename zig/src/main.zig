@@ -90,7 +90,6 @@ fn parseArgs(args: []const []const u8) !Options {
     }
 
     if (!has_path or options.top == 0) return error.Usage;
-    options.max_word = normalizeMaxWord(options.max_word);
     return options;
 }
 
@@ -98,23 +97,20 @@ fn countBytes(allocator: std.mem.Allocator, bytes: []const u8, top: usize, max_w
     var counts = std.StringHashMap(u64).init(allocator);
     var word: std.ArrayList(u8) = .empty;
     var total: u64 = 0;
-    var in_word = false;
     const normalized_max_word = normalizeMaxWord(max_word);
 
     for (bytes) |byte| {
-        if (isLetter(byte)) {
-            in_word = true;
+        if (std.ascii.isAlphabetic(byte)) {
             if (word.items.len < normalized_max_word) {
-                try word.append(allocator, lowerAscii(byte));
+                try word.append(allocator, std.ascii.toLower(byte));
             }
-        } else if (in_word) {
+        } else if (word.items.len > 0) {
             try commitWord(allocator, &counts, word.items, &total);
             word.clearRetainingCapacity();
-            in_word = false;
         }
     }
 
-    if (in_word) {
+    if (word.items.len > 0) {
         try commitWord(allocator, &counts, word.items, &total);
     }
 
@@ -157,15 +153,6 @@ fn commitWord(
 fn compareEntries(_: void, left: Entry, right: Entry) bool {
     if (left.count != right.count) return left.count > right.count;
     return std.mem.lessThan(u8, left.word, right.word);
-}
-
-fn isLetter(byte: u8) bool {
-    const lower = byte | 32;
-    return lower >= 'a' and lower <= 'z';
-}
-
-fn lowerAscii(byte: u8) u8 {
-    return if (byte >= 'A' and byte <= 'Z') byte + 32 else byte;
 }
 
 fn renderJson(writer: anytype, result: Result) !void {

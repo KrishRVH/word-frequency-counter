@@ -58,7 +58,7 @@
       "@phpcs",
       "@phpmd"
     ],
-    "syntax": "php -l src/Cli.php && php -l src/CliOptions.php && php -l src/CliOptionValue.php && php -l src/Entry.php && php -l src/Result.php && php -l src/WordCounter.php && php -l bin/wordcount"
+    "syntax": "php -l src/Cli.php && php -l src/CliOptions.php && php -l src/Entry.php && php -l src/Result.php && php -l src/WordCounter.php && php -l bin/wordcount"
   },
   "scripts-descriptions": {
     "analyze": "Run static analysis with PHPStan and Psalm.",

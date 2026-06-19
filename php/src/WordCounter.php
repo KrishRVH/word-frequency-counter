@@ -24,10 +24,12 @@ final class WordCounter
 
     public function countBytes(string $bytes, int $top, int $maxWord): Result
     {
+        /**
+         * @phpstan-var array<array-key, int> $counts
+         * @psalm-var array<string, int> $counts
+         */
         $counts = [];
         $word = '';
-        $inWord = false;
-        $stored = 0;
         $total = 0;
         $length = strlen($bytes);
 
@@ -35,31 +37,27 @@ final class WordCounter
             $byte = ord($bytes[$index]);
 
             if ($this->isLetter($byte)) {
-                $inWord = true;
-                if ($stored < $maxWord) {
+                if (strlen($word) < $maxWord) {
                     $word .= chr($this->lowerAscii($byte));
-                    $stored++;
                 }
                 continue;
             }
 
-            if ($inWord) {
+            if ($word !== '') {
                 $counts[$word] = ($counts[$word] ?? 0) + 1;
                 $total++;
                 $word = '';
-                $stored = 0;
-                $inWord = false;
             }
         }
 
-        if ($inWord) {
+        if ($word !== '') {
             $counts[$word] = ($counts[$word] ?? 0) + 1;
             $total++;
         }
 
         $entries = [];
         foreach ($counts as $entryWord => $count) {
-            $entries[] = new Entry($entryWord, $count);
+            $entries[] = new Entry((string) $entryWord, $count);
         }
 
         usort(
@@ -82,8 +80,7 @@ final class WordCounter
      */
     private function isLetter(int $byte): bool
     {
-        $lower = $byte | 32;
-        return $lower >= 97 && $lower <= 122;
+        return ($byte >= 65 && $byte <= 90) || ($byte >= 97 && $byte <= 122);
     }
 
     /**

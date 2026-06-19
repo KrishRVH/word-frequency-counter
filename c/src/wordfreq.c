@@ -28,8 +28,8 @@ typedef struct {
 
 static bool is_letter(unsigned char byte)
 {
-    unsigned int lower = (unsigned int)byte | 32u;
-    return lower - (unsigned int)'a' < 26u;
+    return (byte >= (unsigned char)'A' && byte <= (unsigned char)'Z') ||
+           (byte >= (unsigned char)'a' && byte <= (unsigned char)'z');
 }
 
 static unsigned char lower_ascii(unsigned char byte)
@@ -160,43 +160,39 @@ static void table_free(Table *table)
 
 static int finish(Table *table, WfResult *result)
 {
-    result->entries = NULL;
-    result->unique = table->len;
-    result->total = table->total;
+    size_t unique = table->len;
+    uint64_t total = table->total;
+    WfEntry *entries = NULL;
 
-    if (table->len == 0) {
+    if (unique == 0) {
+        result->unique = 0;
+        result->total = total;
         free(table->slots);
         *table = (Table){ 0 };
         return 0;
     }
 
-    result->entries = calloc(table->len, sizeof(*result->entries));
-    if (result->entries == NULL) {
+    entries = calloc(unique, sizeof(*entries));
+    if (entries == NULL) {
         return -1;
     }
 
     size_t out = 0;
-    for (size_t i = 0; i < table->cap; i++) {
+    for (size_t i = 0; i < table->cap && out < unique; i++) {
         Slot *slot = &table->slots[i];
 
         if (slot->word == NULL) {
             continue;
         }
 
-        if (out >= table->len) {
-            return -1;
-        }
-        result->entries[out++] =
-                (WfEntry){ .word = slot->word, .count = slot->count };
-        slot->word = NULL;
-    }
-
-    if (out != table->len) {
-        return -1;
+        entries[out++] = (WfEntry){ .word = slot->word, .count = slot->count };
     }
 
     free(table->slots);
     *table = (Table){ 0 };
+    result->entries = entries;
+    result->unique = unique;
+    result->total = total;
     wf_result_sort(result);
     return 0;
 }

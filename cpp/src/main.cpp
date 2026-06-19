@@ -1,10 +1,11 @@
 #include <algorithm>
 #include <charconv>
 #include <cstddef>
+#include <cstdio>
 #include <cstdint>
 #include <fstream>
-#include <iostream>
 #include <iterator>
+#include <print>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -18,6 +19,8 @@ namespace
 constexpr auto default_max_word = std::size_t{ 64 };
 constexpr auto max_word_limit = std::size_t{ 1024 };
 constexpr auto min_word = std::size_t{ 4 };
+constexpr auto usage =
+        "usage: wordcount_cpp [--json] [--top N] [--max-word N] <file>";
 
 struct Entry {
     std::string word;
@@ -39,9 +42,10 @@ struct Options {
 
 [[nodiscard]] auto is_letter(unsigned char byte) -> bool
 {
-    const auto lower = static_cast<unsigned char>(byte | 32U);
-    return lower >= static_cast<unsigned char>('a') &&
-           lower <= static_cast<unsigned char>('z');
+    return (byte >= static_cast<unsigned char>('A') &&
+            byte <= static_cast<unsigned char>('Z')) ||
+           (byte >= static_cast<unsigned char>('a') &&
+            byte <= static_cast<unsigned char>('z'));
 }
 
 [[nodiscard]] auto lower_ascii(unsigned char byte) -> char
@@ -82,55 +86,31 @@ struct Options {
 [[nodiscard]] auto parse_args(int argc, char **argv) -> Options
 {
     Options options;
-    auto parse_option = [&](std::string_view arg,
-                            std::string_view name,
-                            std::string_view prefix,
-                            std::size_t &target,
-                            int &index) -> bool {
-        if (arg == name) {
-            if (++index >= argc) {
-                throw std::invalid_argument{
-                    "usage: wordcount_cpp [--json] [--top N] [--max-word N] "
-                    "<file>"
-                };
-            }
-            target = parse_size(argv[index]);
-            return true;
-        }
-
-        if (arg.starts_with(prefix)) {
-            target = parse_size(arg.substr(prefix.size()));
-            return true;
-        }
-
-        return false;
-    };
 
     for (int index = 1; index < argc; ++index) {
         const std::string_view arg{ argv[index] };
 
         if (arg == "--json") {
             options.json = true;
-        } else if (parse_option(arg, "--top", "--top=", options.top, index) ||
-                   parse_option(arg,
-                                "--max-word",
-                                "--max-word=",
-                                options.max_word,
-                                index)) {
-            continue;
+        } else if (arg == "--top" || arg == "--max-word") {
+            if (++index >= argc) {
+                throw std::invalid_argument{ usage };
+            }
+            (arg == "--top" ? options.top : options.max_word) =
+                    parse_size(argv[index]);
+        } else if (arg.starts_with("--top=")) {
+            options.top = parse_size(arg.substr(6));
+        } else if (arg.starts_with("--max-word=")) {
+            options.max_word = parse_size(arg.substr(11));
         } else if (options.path.empty() && !arg.starts_with("-")) {
             options.path = std::string{ arg };
         } else {
-            throw std::invalid_argument{
-                "usage: wordcount_cpp [--json] [--top N] [--max-word N] <file>"
-            };
+            throw std::invalid_argument{ usage };
         }
     }
 
     if (options.path.empty() || options.top == 0) {
-        throw std::invalid_argument{
-            "usage: wordcount_cpp [--json] [--top N] [--max-word N] <file>"
-        };
+        throw std::invalid_argument{ usage };
     }
     options.max_word = normalize_max_word(options.max_word);
 
@@ -161,29 +141,26 @@ struct Options {
     std::unordered_map<std::string, std::uint64_t> counts;
     std::string word;
     std::uint64_t total = 0;
-    bool in_word = false;
 
     max_word = normalize_max_word(max_word);
     word.reserve(std::min<std::size_t>(max_word, 64));
 
     for (const auto byte : bytes) {
         if (is_letter(byte)) {
-            in_word = true;
             if (word.size() < max_word) {
                 word.push_back(lower_ascii(byte));
             }
             continue;
         }
 
-        if (in_word) {
+        if (!word.empty()) {
             ++counts[word];
             ++total;
             word.clear();
-            in_word = false;
         }
     }
 
-    if (in_word) {
+    if (!word.empty()) {
         ++counts[word];
         ++total;
     }
@@ -212,24 +189,26 @@ struct Options {
 
 void render_json(const Result &result)
 {
-    std::cout << "{\"total\":" << result.total
-              << ",\"unique\":" << result.unique << ",\"top\":[";
+    std::print("{{\"total\":{},\"unique\":{},\"top\":[",
+               result.total,
+               result.unique);
     for (std::size_t index = 0; index < result.top.size(); ++index) {
         const auto &entry = result.top[index];
-        std::cout << (index == 0 ? "" : ",") << "{\"word\":\"" << entry.word
-                  << "\",\"count\":" << entry.count << "}";
+        std::print("{}{{\"word\":\"{}\",\"count\":{}}}",
+                   index == 0 ? "" : ",",
+                   entry.word,
+                   entry.count);
     }
-    std::cout << "]}\n";
+    std::println("]}}");
 }
 
 void render_text(const Result &result)
 {
-    std::cout << "count word\n";
+    std::println("count word");
     for (const auto &entry : result.top) {
-        std::cout << entry.count << ' ' << entry.word << '\n';
+        std::println("{} {}", entry.count, entry.word);
     }
-    std::cout << "total " << result.total << "\nunique " << result.unique
-              << '\n';
+    std::println("total {}\nunique {}", result.total, result.unique);
 }
 
 }  // namespace
@@ -243,7 +222,7 @@ auto main(int argc, char **argv) -> int
         options.json ? render_json(result) : render_text(result);
         return 0;
     } catch (const std::exception &error) {
-        std::cerr << "wordcount_cpp: " << error.what() << '\n';
+        (void)std::fprintf(stderr, "wordcount_cpp: %s\n", error.what());
         return 1;
     }
 }

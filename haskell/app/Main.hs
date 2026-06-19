@@ -6,7 +6,7 @@ import Control.Exception (IOException, try)
 import Data.ByteString qualified as ByteString
 import Data.ByteString.Char8 qualified as Char8
 import Data.Char (isDigit)
-import Data.List (intercalate, isPrefixOf, sortBy)
+import Data.List (intercalate, isPrefixOf, sortBy, stripPrefix)
 import Data.Map.Strict qualified as Map
 import Data.Word (Word8)
 import System.Environment (getArgs)
@@ -21,8 +21,8 @@ data Options = Options
     path :: !FilePath
   }
 
-defaultMaxWord, maxWordLimit, minWord :: Int
-defaultMaxWord = 64
+oracleDefaultMaxWord, maxWordLimit, minWord :: Int
+oracleDefaultMaxWord = 64
 maxWordLimit = 1024
 minWord = 4
 
@@ -41,8 +41,7 @@ data Scan = Scan
   { counts :: !(Map.Map ByteString.ByteString Int),
     totalWords :: !Int,
     current :: ![Word8],
-    currentLength :: !Int,
-    inWord :: !Bool
+    currentLength :: !Int
   }
 
 main :: IO ()
@@ -81,8 +80,7 @@ emptyScan =
     { counts = Map.empty,
       totalWords = 0,
       current = [],
-      currentLength = 0,
-      inWord = False
+      currentLength = 0
     }
 
 step :: Int -> Scan -> Word8 -> Scan
@@ -92,23 +90,21 @@ step maxWord scan byte
         then
           scan
             { current = lowerAscii byte : scan.current,
-              currentLength = scan.currentLength + 1,
-              inWord = True
+              currentLength = scan.currentLength + 1
             }
-        else scan {inWord = True}
+        else scan
   | otherwise = finish scan
 
 finish :: Scan -> Scan
 finish scan
-  | not scan.inWord = scan
+  | scan.currentLength == 0 = scan
   | otherwise =
       let key = ByteString.pack (reverse scan.current)
        in scan
             { counts = Map.insertWith (+) key 1 scan.counts,
               totalWords = scan.totalWords + 1,
               current = [],
-              currentLength = 0,
-              inWord = False
+              currentLength = 0
             }
 
 compareEntries :: Entry -> Entry -> Ordering
@@ -133,7 +129,7 @@ lowerA = 97
 lowerZ = 122
 
 parseArgs :: [String] -> Either String Options
-parseArgs = go (Options {json = False, top = 10, maxWord = 1024, path = ""})
+parseArgs = go (Options {json = False, top = 10, maxWord = maxWordLimit, path = ""})
   where
     go options [] =
       if null options.path || options.top <= 0
@@ -143,13 +139,13 @@ parseArgs = go (Options {json = False, top = 10, maxWord = 1024, path = ""})
     go options ("--top" : value : rest) =
       parseNumber "--top" value >>= \top -> go options {top = top} rest
     go options (arg : rest)
-      | Just value <- dropPrefix "--top=" arg =
+      | Just value <- stripPrefix "--top=" arg =
           parseNumber "--top" value >>= \top -> go options {top = top} rest
     go options ("--max-word" : value : rest) =
       parseNumber "--max-word" value >>= \maxWord ->
         go options {maxWord = maxWord} rest
     go options (arg : rest)
-      | Just value <- dropPrefix "--max-word=" arg =
+      | Just value <- stripPrefix "--max-word=" arg =
           parseNumber "--max-word" value >>= \maxWord ->
             go options {maxWord = maxWord} rest
     go options (arg : rest)
@@ -164,14 +160,8 @@ parseNumber name value =
     else Left (name <> " must be a number")
 
 normalizeMaxWord :: Int -> Int
-normalizeMaxWord 0 = defaultMaxWord
+normalizeMaxWord 0 = oracleDefaultMaxWord
 normalizeMaxWord value = min maxWordLimit (max minWord value)
-
-dropPrefix :: String -> String -> Maybe String
-dropPrefix prefix text =
-  if prefix `isPrefixOf` text
-    then Just (drop (length prefix) text)
-    else Nothing
 
 renderText :: Result -> String
 renderText result =

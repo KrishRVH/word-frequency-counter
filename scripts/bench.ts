@@ -1,4 +1,4 @@
-import { mkdirSync, statSync } from "node:fs";
+import { mkdirSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
@@ -19,8 +19,25 @@ type Implementation = {
   run: (fixture: string, top: number, maxWord: number) => Command;
 };
 
+type BenchOptions = {
+  fixture: string;
+  top: number;
+  maxWord: number;
+  runs: number;
+  buildOnly: boolean;
+  validateOnly: boolean;
+};
+
+type ValidationCase = {
+  name: string;
+  fixture: string;
+  top: number;
+  maxWord: number;
+};
+
 const root = resolve(import.meta.dir, "..");
 const buildBin = join(root, "build", "bin");
+const validationFixtures = join(root, "build", "fixtures");
 const haskellBuild = join(root, "build", "haskell");
 const tokenfreqRoot = join(homedir(), "dev/personal/tokenfreq-c99");
 const defaultOracle = join(tokenfreqRoot, "build/clang/wc");
@@ -290,27 +307,38 @@ const implementations: Implementation[] = [
 
 const options = parseArgs(process.argv.slice(2));
 mkdirSync(buildBin, { recursive: true });
+mkdirSync(validationFixtures, { recursive: true });
 mkdirSync(haskellBuild, { recursive: true });
 
 await ensureOracle();
 await buildAll();
 
 if (!options.buildOnly) {
-  const oracle = await oracleResult(
-    options.fixture,
-    options.top,
-    options.maxWord,
-  );
+  const validationCases = createValidationCases(options);
+  const expectedCases: { testCase: ValidationCase; oracle: JsonResult }[] = [];
   const rows: { name: string; status: string; meanMs?: number }[] = [];
 
+  for (const testCase of validationCases) {
+    expectedCases.push({
+      testCase,
+      oracle: await oracleResult(
+        testCase.fixture,
+        testCase.top,
+        testCase.maxWord,
+      ),
+    });
+  }
+
   for (const implementation of implementations) {
-    const result = await runJson(
-      implementation,
-      options.fixture,
-      options.top,
-      options.maxWord,
-    );
-    assertSame(implementation.name, oracle, result);
+    for (const { testCase, oracle } of expectedCases) {
+      const result = await runJson(
+        implementation,
+        testCase.fixture,
+        testCase.top,
+        testCase.maxWord,
+      );
+      assertSame(`${implementation.name} (${testCase.name})`, oracle, result);
+    }
     const meanMs = options.validateOnly
       ? undefined
       : await benchmark(
@@ -326,8 +354,8 @@ if (!options.buildOnly) {
   printSummary(rows);
 }
 
-function parseArgs(args: string[]) {
-  const parsed = {
+function parseArgs(args: string[]): BenchOptions {
+  const parsed: BenchOptions = {
     fixture: process.env.WFC_FIXTURE ?? "fixtures/spec.txt",
     top: parseDecimal(process.env.WFC_TOP ?? "10", "WFC_TOP"),
     maxWord: parseDecimal(process.env.WFC_MAX_WORD ?? "1024", "WFC_MAX_WORD"),
@@ -358,6 +386,82 @@ function parseArgs(args: string[]) {
 
   parsed.fixture = resolve(root, parsed.fixture);
   return parsed;
+}
+
+function createValidationCases(options: BenchOptions): ValidationCase[] {
+  const requested = {
+    name: "requested",
+    fixture: options.fixture,
+    top: options.top,
+    maxWord: options.maxWord,
+  };
+
+  if (!options.validateOnly) {
+    return [requested];
+  }
+
+  const generated = [
+    {
+      name: "empty",
+      content: "",
+      top: 10,
+      maxWord: 1024,
+    },
+    {
+      name: "separators",
+      content: new Uint8Array([0, 9, 10, 32, 33, 45, 48, 57, 95, 255]),
+      top: 10,
+      maxWord: 1024,
+    },
+    {
+      name: "ascii-contract",
+      content: "Apple apple APPLE\nfoo-bar\n123abc456\nit's\nz b a\n",
+      top: 20,
+      maxWord: 1024,
+    },
+    {
+      name: "non-ascii-bytes",
+      content: new Uint8Array([
+        99, 97, 102, 195, 169, 32, 110, 97, 195, 175, 118, 101, 32, 0, 65, 90,
+      ]),
+      top: 10,
+      maxWord: 1024,
+    },
+    {
+      name: "default-max-word",
+      content: `${"A".repeat(80)} ${"a".repeat(64)} ${"b".repeat(65)}\n`,
+      top: 10,
+      maxWord: 0,
+    },
+    {
+      name: "min-word-clamp",
+      content: "alphabet alpha alphanumeric ALPHABET\n",
+      top: 10,
+      maxWord: 1,
+    },
+    {
+      name: "top-limit",
+      content: "b a c a b a d d d e\n",
+      top: 3,
+      maxWord: 1024,
+    },
+  ];
+
+  return [
+    requested,
+    ...generated.map((testCase) => ({
+      name: testCase.name,
+      fixture: writeValidationFixture(testCase.name, testCase.content),
+      top: testCase.top,
+      maxWord: testCase.maxWord,
+    })),
+  ];
+}
+
+function writeValidationFixture(name: string, content: string | Uint8Array) {
+  const fixture = join(validationFixtures, `${name}.txt`);
+  writeFileSync(fixture, content);
+  return fixture;
 }
 
 function parseDecimal(value: string, name: string) {

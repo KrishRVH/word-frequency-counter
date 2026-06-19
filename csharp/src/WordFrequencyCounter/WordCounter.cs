@@ -24,15 +24,8 @@ internal static class WordCounter {
         }
     }
 
-    internal static Result CountBytes(ReadOnlySpan<byte> bytes, int top, int maxWord) {
-        Accumulator accumulator = new(maxWord);
-        accumulator.AddBytes(bytes);
-        return accumulator.Finish(top);
-    }
-
     private static bool IsLetter(byte value) {
-        byte lower = (byte) (value | 32);
-        return lower is >= (byte) 'a' and <= (byte) 'z';
+        return value is >= (byte) 'A' and <= (byte) 'Z' or >= (byte) 'a' and <= (byte) 'z';
     }
 
     private static byte LowerAscii(byte value) => value is >= (byte) 'A' and <= (byte) 'Z' ? (byte) (value + 32) : value;
@@ -41,7 +34,6 @@ internal static class WordCounter {
         private readonly Dictionary<string, ulong> counts = new(StringComparer.Ordinal);
         private readonly int maxWord;
         private readonly StringBuilder word;
-        private bool inWord;
         private ulong total;
 
         internal Accumulator(int maxWord) {
@@ -51,22 +43,21 @@ internal static class WordCounter {
 
         internal void AddBytes(ReadOnlySpan<byte> bytes) {
             foreach (byte value in bytes) {
-                if (IsLetter(value)) {
-                    inWord = true;
+                if (WordCounter.IsLetter(value)) {
                     if (word.Length < maxWord) {
-                        word.Append((char) LowerAscii(value));
+                        word.Append((char) WordCounter.LowerAscii(value));
                     }
                     continue;
                 }
 
-                if (inWord) {
+                if (word.Length > 0) {
                     AddWord();
                 }
             }
         }
 
         internal Result Finish(int top) {
-            if (inWord) {
+            if (word.Length > 0) {
                 AddWord();
             }
 
@@ -85,11 +76,6 @@ internal static class WordCounter {
             counts[key] = counts.TryGetValue(key, out ulong count) ? count + 1 : 1;
             total++;
             word.Clear();
-            inWord = false;
         }
-
-        private static bool IsLetter(byte value) => WordCounter.IsLetter(value);
-
-        private static byte LowerAscii(byte value) => WordCounter.LowerAscii(value);
     }
 }

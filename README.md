@@ -4,6 +4,12 @@ One ASCII word-frequency problem implemented across twelve languages. The point
 is not to chase every last cycle; it is to compare small, idiomatic,
 well-policed implementations that all obey the same byte-level contract.
 
+The implementations are meant to be good examples of each language, not
+translations forced through one architecture. Prefer the smallest clear shape
+that feels natural in that language. The shared harness carries the edge-case
+correctness pressure so the language directories can stay readable and useful
+as reference code.
+
 The correctness source of truth is
 `~/dev/personal/tokenfreq-c99`. This repository builds or invokes that C99
 oracle and compares every implementation against its JSON output.
@@ -124,8 +130,9 @@ mise run validate
 ```
 
 There are intentionally no per-language test suites. Correctness is the oracle
-comparison. There is also intentionally no CI, no Dagger setup, and no GitHub
-workflow surface.
+comparison: `mise run validate` checks the requested fixture and a small matrix
+of generated edge-case fixtures against `tokenfreq-c99`. There is also
+intentionally no CI, no Dagger setup, and no GitHub workflow surface.
 
 ## Standards Surface
 

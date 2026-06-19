@@ -12,14 +12,14 @@ pub struct Entry {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Result {
+pub struct WordCounts {
     pub total: u64,
     pub unique: usize,
     pub top: Vec<Entry>,
 }
 
 #[must_use]
-pub fn count_words(bytes: &[u8], limit: usize, max_word: usize) -> Result {
+pub fn count_words(bytes: &[u8], limit: usize, max_word: usize) -> WordCounts {
     let mut counts: HashMap<String, u64> = HashMap::new();
     let mut word = String::new();
     let mut total = 0u64;
@@ -49,7 +49,7 @@ pub fn count_words(bytes: &[u8], limit: usize, max_word: usize) -> Result {
     });
     top.truncate(limit);
 
-    Result { total, unique, top }
+    WordCounts { total, unique, top }
 }
 
 #[must_use]
@@ -75,7 +75,7 @@ fn finish_word(counts: &mut HashMap<String, u64>, word: &mut String, total: &mut
 }
 
 #[must_use]
-pub fn render_text(result: &Result) -> String {
+pub fn render_text(result: &WordCounts) -> String {
     let mut output = String::from("count word\n");
 
     for entry in &result.top {
@@ -87,7 +87,7 @@ pub fn render_text(result: &Result) -> String {
 }
 
 #[must_use]
-pub fn render_json(result: &Result) -> String {
+pub fn render_json(result: &WordCounts) -> String {
     let entries = result
         .top
         .iter()

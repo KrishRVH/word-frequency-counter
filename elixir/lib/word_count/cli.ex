@@ -1,10 +1,6 @@
 defmodule WordCount.CLI do
   @moduledoc false
 
-  @default_max_word 64
-  @max_word 1024
-  @min_word 4
-
   def main(args) do
     with {:ok, options} <- parse(args),
          {:ok, bytes} <- File.read(options.path) do
@@ -25,9 +21,9 @@ defmodule WordCount.CLI do
     parse(args, %{json: false, top: 10, max_word: 1024, path: nil})
   end
 
-  defp parse([], %{path: path, top: top, max_word: max_word} = options)
+  defp parse([], %{path: path, top: top} = options)
        when is_binary(path) and top > 0 do
-    {:ok, %{options | max_word: normalize_max_word(max_word)}}
+    {:ok, options}
   end
 
   defp parse(["--json" | rest], options), do: parse(rest, %{options | json: true})
@@ -61,11 +57,6 @@ defmodule WordCount.CLI do
   end
 
   defp whole_decimal?(_value), do: false
-
-  defp normalize_max_word(0), do: @default_max_word
-  defp normalize_max_word(max_word) when max_word < @min_word, do: @min_word
-  defp normalize_max_word(max_word) when max_word > @max_word, do: @max_word
-  defp normalize_max_word(max_word), do: max_word
 
   defp usage, do: "usage: wordcount_elixir [--json] [--top N] [--max-word N] <file>"
 

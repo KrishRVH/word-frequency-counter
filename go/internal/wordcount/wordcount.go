@@ -28,7 +28,7 @@ type Result struct {
 func Count(reader io.Reader, maxWord int) (Result, error) {
 	counts := make(map[string]uint64, 16_384)
 	buffered := bufio.NewReaderSize(reader, readBufferSize)
-	word := make([]byte, 0, 64)
+	word := make([]byte, 0, defaultMaxWord)
 	total := uint64(0)
 	maxWord = NormalizeMaxWord(maxWord)
 
@@ -96,8 +96,7 @@ func NormalizeMaxWord(maxWord int) int {
 }
 
 func isLetter(byteValue byte) bool {
-	lower := byteValue | 32
-	return lower >= 'a' && lower <= 'z'
+	return (byteValue >= 'A' && byteValue <= 'Z') || (byteValue >= 'a' && byteValue <= 'z')
 }
 
 func lowerASCII(byteValue byte) byte {

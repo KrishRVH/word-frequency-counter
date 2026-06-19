@@ -1,13 +1,13 @@
 #!/usr/bin/env lua
 
-package.path = debug
-  .getinfo(1, "S").source
-  :sub(2)
-  :gsub("/bin/wordcount%.lua$", "/src/?.lua") .. ";" .. package.path
+local script_path = arg[0] or debug.getinfo(1, "S").source:sub(2)
+package.path = script_path:gsub("/bin/wordcount%.lua$", "/src/?.lua")
+  .. ";"
+  .. package.path
 
 local wordcount = require("wordcount")
 
-local DEFAULT_MAX_WORD = 64
+local ORACLE_DEFAULT_MAX_WORD = 64
 local MAX_WORD = 1024
 local MIN_WORD = 4
 
@@ -19,11 +19,10 @@ local function usage()
 end
 
 local function parse_number(value)
-  if type(value) ~= "string" or value:match("^%d+$") == nil then
-    usage()
-  end
-  local number = tonumber(value)
-  if number == nil then
+  local number = type(value) == "string"
+    and value:match("^%d+$")
+    and tonumber(value)
+  if not number then
     usage()
   end
   return number
@@ -31,7 +30,7 @@ end
 
 local function normalize_max_word(value)
   if value == 0 then
-    return DEFAULT_MAX_WORD
+    return ORACLE_DEFAULT_MAX_WORD
   end
   return math.min(math.max(value, MIN_WORD), MAX_WORD)
 end

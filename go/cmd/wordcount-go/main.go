@@ -29,23 +29,23 @@ func run() error {
 	maxWord := flag.Int("max-word", 1024, "maximum stored word length")
 	flag.Parse()
 
-	if flag.NArg() != 1 || *topLimit <= 0 {
+	if flag.NArg() != 1 || *topLimit <= 0 || *maxWord < 0 {
 		return errors.New("usage: wordcount_go [--json] [--top N] [--max-word N] <file>")
 	}
-	*maxWord = wordcount.NormalizeMaxWord(*maxWord)
+	path := flag.Arg(0)
 
 	file, err := os.Open(flag.Arg(0))
 	if err != nil {
-		return fmt.Errorf("wordcount_go: cannot open %s: %w", flag.Arg(0), err)
+		return fmt.Errorf("wordcount_go: cannot open %s: %w", path, err)
 	}
 
 	result, err := wordcount.Count(file, *maxWord)
 	closeErr := file.Close()
 	if err != nil {
-		return fmt.Errorf("wordcount_go: cannot read %s: %w", flag.Arg(0), err)
+		return fmt.Errorf("wordcount_go: cannot read %s: %w", path, err)
 	}
 	if closeErr != nil {
-		return fmt.Errorf("wordcount_go: cannot close %s: %w", flag.Arg(0), closeErr)
+		return fmt.Errorf("wordcount_go: cannot close %s: %w", path, closeErr)
 	}
 
 	report := output{

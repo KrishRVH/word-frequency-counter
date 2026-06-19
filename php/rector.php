@@ -10,7 +10,7 @@ use Rector\Set\ValueObject\SetList;
 
 return RectorConfig::configure()
     ->withoutParallel()
-    ->withPaths([__DIR__ . '/src'])
+    ->withPaths([__DIR__ . '/src', __DIR__ . '/bin/wordcount'])
     ->withSets([
         LevelSetList::UP_TO_PHP_85,
         SetList::CODE_QUALITY,

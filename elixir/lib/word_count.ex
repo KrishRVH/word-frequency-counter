@@ -8,17 +8,12 @@ defmodule WordCount do
   def count_bytes(bytes, top, max_word) when is_binary(bytes) do
     max_word = normalize_max_word(max_word)
 
-    {counts, total, word, _stored, in_word} =
-      bytes
-      |> :binary.bin_to_list()
-      |> Enum.reduce({%{}, 0, [], 0, false}, &step(&1, &2, max_word))
-
-    {counts, total} =
-      if in_word do
-        finish_word(counts, total, word)
-      else
-        {counts, total}
+    {counts, total, word, _stored} =
+      for <<byte <- bytes>>, reduce: {%{}, 0, [], 0} do
+        state -> step(byte, state, max_word)
       end
+
+    {counts, total} = finish_word(counts, total, word)
 
     entries =
       counts
@@ -29,23 +24,24 @@ defmodule WordCount do
     %{total: total, unique: map_size(counts), top: entries}
   end
 
-  defp step(byte, {counts, total, word, stored, in_word}, max_word) do
+  defp step(byte, {counts, total, word, stored}, max_word) do
     cond do
-      letter?(byte) ->
-        if stored < max_word do
-          {counts, total, [lower_ascii(byte) | word], stored + 1, true}
-        else
-          {counts, total, word, stored, true}
-        end
+      letter?(byte) and stored < max_word ->
+        {counts, total, [lower_ascii(byte) | word], stored + 1}
 
-      in_word ->
+      letter?(byte) ->
+        {counts, total, word, stored}
+
+      word != [] ->
         {counts, total} = finish_word(counts, total, word)
-        {counts, total, [], 0, false}
+        {counts, total, [], 0}
 
       true ->
-        {counts, total, word, stored, false}
+        {counts, total, word, stored}
     end
   end
+
+  defp finish_word(counts, total, []), do: {counts, total}
 
   defp finish_word(counts, total, word) do
     key = word |> Enum.reverse() |> List.to_string()

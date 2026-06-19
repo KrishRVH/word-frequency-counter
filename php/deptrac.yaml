@@ -6,7 +6,7 @@ deptrac:
     - name: Domain
       collectors:
         - type: classLike
-          value: ^WordFrequencyCounter\\(Cli|CliOptions|CliOptionValue|Entry|Result|WordCounter)$
+          value: ^WordFrequencyCounter\\(Cli|CliOptions|Entry|Result|WordCounter)$
 
   ruleset:
     Domain: []

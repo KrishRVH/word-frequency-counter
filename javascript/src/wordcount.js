@@ -2,6 +2,7 @@
 // @ts-check
 
 import { readFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 
 /**
  * @typedef {{ word: string, count: number }} Entry
@@ -9,9 +10,10 @@ import { readFileSync } from "node:fs";
  * @typedef {{ path: string, top: number, maxWord: number, json: boolean }} Options
  */
 
-const defaultMaxWord = 64;
+const oracleDefaultMaxWord = 64;
 const maxWordLimit = 1024;
 const minWord = 4;
+const usage = "usage: wordcount_js [--json] [--top N] [--max-word N] <file>";
 
 /**
  * @param {Uint8Array} bytes
@@ -19,7 +21,7 @@ const minWord = 4;
  * @param {number} maxWord
  * @returns {Result}
  */
-export function countWords(bytes, limit = 10, maxWord = 1024) {
+export function countWords(bytes, limit = 10, maxWord = maxWordLimit) {
   /** @type {Map<string, number>} */
   const counts = new Map();
   let word = "";
@@ -105,7 +107,7 @@ function compareAscii(left, right) {
 function parseArgs(args) {
   let path;
   let top = 10;
-  let maxWord = 1024;
+  let maxWord = maxWordLimit;
   let json = false;
 
   for (let index = 0; index < args.length; index += 1) {
@@ -127,13 +129,11 @@ function parseArgs(args) {
     } else if (arg.startsWith("--max-word=")) {
       maxWord = parseNumber(arg.slice("--max-word=".length));
     } else if (arg.startsWith("-")) {
-      throw new Error(
-        "usage: node src/wordcount.js [--json] [--top N] [--max-word N] <file>",
-      );
+      throw new Error(usage);
     } else if (path === undefined) {
       path = arg;
     } else {
-      throw new Error("usage: node src/wordcount.js [--json] [--top N] <file>");
+      throw new Error(usage);
     }
   }
 
@@ -143,9 +143,7 @@ function parseArgs(args) {
     top <= 0 ||
     !Number.isInteger(maxWord)
   ) {
-    throw new Error(
-      "usage: node src/wordcount.js [--json] [--top N] [--max-word N] <file>",
-    );
+    throw new Error(usage);
   }
 
   return { path, top, maxWord: normalizeMaxWord(maxWord), json };
@@ -169,13 +167,13 @@ function parseNumber(value) {
  */
 function normalizeMaxWord(value) {
   if (value === 0) {
-    return defaultMaxWord;
+    return oracleDefaultMaxWord;
   }
   return Math.min(Math.max(value, minWord), maxWordLimit);
 }
 
-const invokedPath = process.argv[1];
-if (invokedPath !== undefined && import.meta.url === `file://${invokedPath}`) {
+const invokedUrl = process.argv[1] && pathToFileURL(process.argv[1]).href;
+if (import.meta.url === invokedUrl) {
   try {
     const options = parseArgs(process.argv.slice(2));
     const result = countWords(

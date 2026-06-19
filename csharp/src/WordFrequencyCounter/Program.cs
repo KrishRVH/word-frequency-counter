@@ -45,11 +45,12 @@ internal sealed record Options(string Path, int Top, int MaxWord, bool Json) {
     private const int DefaultMaxWord = 64;
     private const int MaxWordLimit = 1024;
     private const int MinWord = 4;
+    private const string Usage = "usage: wordcount_csharp [--json] [--top N] [--max-word N] <file>";
 
     internal static Options Parse(IReadOnlyList<string> args) {
         string? path = null;
         int top = 10;
-        int maxWord = 1024;
+        int maxWord = MaxWordLimit;
         bool json = false;
 
         for (int index = 0; index < args.Count; index++) {
@@ -57,30 +58,30 @@ internal sealed record Options(string Path, int Top, int MaxWord, bool Json) {
             if (arg == "--json") {
                 json = true;
             } else if (arg == "--top") {
-                top = ParsePositive(args, ++index, "--top");
+                top = ParseValue(args, ++index, "--top");
             } else if (arg.StartsWith("--top=", StringComparison.Ordinal)) {
                 top = ParseNumber(arg[6..], "--top");
             } else if (arg == "--max-word") {
-                maxWord = ParsePositive(args, ++index, "--max-word");
+                maxWord = ParseValue(args, ++index, "--max-word");
             } else if (arg.StartsWith("--max-word=", StringComparison.Ordinal)) {
                 maxWord = ParseNumber(arg[11..], "--max-word");
             } else if (arg.StartsWith('-')) {
-                throw new ArgumentException("usage: wordcount_csharp [--json] [--top N] [--max-word N] <file>");
+                throw new ArgumentException(Usage);
             } else if (path is null) {
                 path = arg;
             } else {
-                throw new ArgumentException("usage: wordcount_csharp [--json] [--top N] [--max-word N] <file>");
+                throw new ArgumentException(Usage);
             }
         }
 
         if (path is null || top <= 0) {
-            throw new ArgumentException("usage: wordcount_csharp [--json] [--top N] [--max-word N] <file>");
+            throw new ArgumentException(Usage);
         }
 
         return new Options(path, top, NormalizeMaxWord(maxWord), json);
     }
 
-    private static int ParsePositive(IReadOnlyList<string> args, int index, string name) {
+    private static int ParseValue(IReadOnlyList<string> args, int index, string name) {
         if (index >= args.Count) {
             throw new ArgumentException($"{name} requires a value");
         }

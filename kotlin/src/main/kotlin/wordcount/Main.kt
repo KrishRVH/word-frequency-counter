@@ -4,7 +4,7 @@ import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
 
-private const val DEFAULT_MAX_WORD = 64
+private const val ORACLE_DEFAULT_MAX_WORD = 64
 private const val DEFAULT_TOP = 10
 private const val INITIAL_CAPACITY = 16_384
 private const val MAX_WORD = 1024
@@ -14,11 +14,11 @@ private const val BYTE_MASK = 0xff
 
 data class Entry(
     val word: String,
-    val count: ULong,
+    val count: Long,
 )
 
 data class Result(
-    val total: ULong,
+    val total: Long,
     val unique: Int,
     val top: List<Entry>,
 )
@@ -29,32 +29,29 @@ fun countBytes(
     maxWord: Int,
 ): Result {
     val normalizedMaxWord = normalizeMaxWord(maxWord)
-    val counts = HashMap<String, ULong>(INITIAL_CAPACITY)
-    val word = StringBuilder(minOf(normalizedMaxWord, DEFAULT_MAX_WORD))
-    var total = 0UL
-    var inWord = false
+    val counts = HashMap<String, Long>(INITIAL_CAPACITY)
+    val word = StringBuilder(minOf(normalizedMaxWord, ORACLE_DEFAULT_MAX_WORD))
+    var total = 0L
 
     for (raw in bytes) {
         val byte = raw.toInt() and BYTE_MASK
         if (isLetter(byte)) {
-            inWord = true
             if (word.length < normalizedMaxWord) {
                 word.append(lowerAscii(byte).toChar())
             }
             continue
         }
 
-        if (inWord) {
+        if (word.isNotEmpty()) {
             commitWord(counts, word)
-            total += 1UL
+            total += 1L
             word.clear()
-            inWord = false
         }
     }
 
-    if (inWord) {
+    if (word.isNotEmpty()) {
         commitWord(counts, word)
-        total += 1UL
+        total += 1L
     }
 
     val entries =
@@ -84,23 +81,20 @@ fun main(args: Array<String>) {
 }
 
 private fun commitWord(
-    counts: MutableMap<String, ULong>,
+    counts: MutableMap<String, Long>,
     word: StringBuilder,
 ) {
     val key = word.toString()
-    counts[key] = (counts[key] ?: 0UL) + 1UL
+    counts[key] = (counts[key] ?: 0L) + 1L
 }
 
-private fun isLetter(byte: Int): Boolean {
-    val lower = byte or ASCII_CASE_BIT
-    return lower in 'a'.code..'z'.code
-}
+private fun isLetter(byte: Int): Boolean = byte in 'A'.code..'Z'.code || byte in 'a'.code..'z'.code
 
 private fun lowerAscii(byte: Int): Int = if (byte in 'A'.code..'Z'.code) byte + ASCII_CASE_BIT else byte
 
 private fun normalizeMaxWord(value: Int): Int =
     when {
-        value == 0 -> DEFAULT_MAX_WORD
+        value == 0 -> ORACLE_DEFAULT_MAX_WORD
         value < MIN_WORD -> MIN_WORD
         value > MAX_WORD -> MAX_WORD
         else -> value

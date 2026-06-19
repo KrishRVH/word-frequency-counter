@@ -9,7 +9,7 @@ use Throwable;
 
 final class Cli
 {
-    private const int DEFAULT_MAX_WORD = 64;
+    private const int ORACLE_DEFAULT_MAX_WORD = 64;
     private const int MAX_WORD_LIMIT = 1024;
     private const int MIN_WORD = 4;
     private const string USAGE = "usage: php/bin/wordcount [--json] [--top N] [--max-word N] <file>\n";
@@ -68,9 +68,9 @@ final class Cli
             }
 
             $topOption = self::readNumberOption($arguments, $argument, '--top', '--top=', $index);
-            if ($topOption instanceof CliOptionValue) {
-                $index = $topOption->index;
-                $top = $topOption->value;
+            if ($topOption !== null) {
+                $index = $topOption['index'];
+                $top = $topOption['value'];
                 continue;
             }
 
@@ -81,9 +81,9 @@ final class Cli
                 '--max-word=',
                 $index,
             );
-            if ($maxWordOption instanceof CliOptionValue) {
-                $index = $maxWordOption->index;
-                $maxWord = $maxWordOption->value;
+            if ($maxWordOption !== null) {
+                $index = $maxWordOption['index'];
+                $maxWord = $maxWordOption['value'];
                 continue;
             }
 
@@ -108,6 +108,8 @@ final class Cli
 
     /**
      * @param list<string> $arguments
+     *
+     * @return array{index: int, value: int}|null
      */
     private static function readNumberOption(
         array $arguments,
@@ -115,15 +117,15 @@ final class Cli
         string $name,
         string $prefix,
         int $index,
-    ): ?CliOptionValue {
+    ): ?array {
         if ($argument === $name) {
             $index++;
 
-            return new CliOptionValue($index, self::parseNumber($arguments[$index] ?? null));
+            return ['index' => $index, 'value' => self::parseNumber($arguments[$index] ?? null)];
         }
 
         if (str_starts_with($argument, $prefix)) {
-            return new CliOptionValue($index, self::parseNumber(substr($argument, strlen($prefix))));
+            return ['index' => $index, 'value' => self::parseNumber(substr($argument, strlen($prefix)))];
         }
 
         return null;
@@ -146,7 +148,7 @@ final class Cli
     private static function normalizeMaxWord(int $value): int
     {
         if ($value === 0) {
-            return self::DEFAULT_MAX_WORD;
+            return self::ORACLE_DEFAULT_MAX_WORD;
         }
 
         return min(max($value, self::MIN_WORD), self::MAX_WORD_LIMIT);
