@@ -36,13 +36,52 @@ type ValidationCase = {
   maxWord: number;
 };
 
+type BenchmarkState = {
+  implementation: Implementation;
+  command: Command;
+  startupCommand: Command;
+  totalSamples: number[];
+  startupSamples: number[];
+  adjustedSamples: number[];
+};
+
+type BenchmarkResult = {
+  totalMeanMs: number;
+  startupMeanMs: number;
+  adjustedMeanMs: number;
+  adjustedP95Ms: number;
+};
+
+type SummaryRow = {
+  name: string;
+  status: string;
+  timing?: BenchmarkResult;
+};
+
 const root = resolve(import.meta.dir, "..");
 const buildBin = join(root, "build", "bin");
+const csharpBin = join(
+  root,
+  "csharp/src/WordFrequencyCounter/bin/Release/net10.0/WordFrequencyCounter" +
+    (process.platform === "win32" ? ".exe" : ""),
+);
 const validationFixtures = join(root, "build", "fixtures");
+const benchmarkFixture = join(validationFixtures, "benchmark.txt");
 const startupFixture = join(validationFixtures, "startup-empty.txt");
 const haskellBuild = join(root, "build", "haskell");
 const tokenfreqRoot = join(homedir(), "dev/personal/tokenfreq-c99");
 const defaultOracle = join(tokenfreqRoot, "build/clang/wc");
+const benchmarkWords = [
+  "Alpha",
+  "beta",
+  "GAMMA",
+  "delta",
+  "epsilon",
+  "zeta",
+  "eta",
+  "theta",
+];
+const benchmarkSeparators = [" ", "\n", ",", "--", "123", "\t", "!!"];
 
 const implementations: Implementation[] = [
   {
@@ -168,15 +207,8 @@ const implementations: Implementation[] = [
       },
     ],
     run: (fixture, top, maxWord) => ({
-      cmd: "dotnet",
+      cmd: csharpBin,
       args: [
-        "run",
-        "--project",
-        "csharp/src/WordFrequencyCounter/WordFrequencyCounter.csproj",
-        "-c",
-        "Release",
-        "--no-build",
-        "--",
         "--json",
         "--top",
         String(top),
@@ -311,6 +343,7 @@ const options = parseArgs(process.argv.slice(2));
 mkdirSync(buildBin, { recursive: true });
 mkdirSync(validationFixtures, { recursive: true });
 mkdirSync(haskellBuild, { recursive: true });
+writeFileSync(benchmarkFixture, createBenchmarkFixture());
 writeFileSync(startupFixture, "");
 
 await ensureOracle();
@@ -319,7 +352,7 @@ await buildAll();
 if (!options.buildOnly) {
   const validationCases = createValidationCases(options);
   const expectedCases: { testCase: ValidationCase; oracle: JsonResult }[] = [];
-  const rows: { name: string; status: string; meanMs?: number }[] = [];
+  const rows: SummaryRow[] = [];
 
   for (const testCase of validationCases) {
     expectedCases.push({
@@ -342,17 +375,24 @@ if (!options.buildOnly) {
       );
       assertSame(`${implementation.name} (${testCase.name})`, oracle, result);
     }
-    const meanMs = options.validateOnly
-      ? undefined
-      : await benchmark(
-          implementation,
-          options.fixture,
-          options.top,
-          options.maxWord,
-          options.runs,
-          options.warmups,
-        );
-    rows.push({ name: implementation.name, status: "ok", meanMs });
+    rows.push({ name: implementation.name, status: "ok" });
+  }
+
+  if (!options.validateOnly) {
+    const timings = await benchmarkAll(
+      implementations,
+      options.fixture,
+      options.top,
+      options.maxWord,
+      options.runs,
+      options.warmups,
+    );
+    for (const row of rows) {
+      const timing = timings.get(row.name);
+      if (timing !== undefined) {
+        row.timing = timing;
+      }
+    }
   }
 
   printSummary(rows);
@@ -360,7 +400,7 @@ if (!options.buildOnly) {
 
 function parseArgs(args: string[]): BenchOptions {
   const parsed: BenchOptions = {
-    fixture: process.env.WFC_FIXTURE ?? "fixtures/spec.txt",
+    fixture: process.env.WFC_FIXTURE ?? benchmarkFixture,
     top: parseDecimal(process.env.WFC_TOP ?? "10", "WFC_TOP"),
     maxWord: parseDecimal(process.env.WFC_MAX_WORD ?? "1024", "WFC_MAX_WORD"),
     runs: 5,
@@ -405,10 +445,6 @@ function createValidationCases(options: BenchOptions): ValidationCase[] {
     top: options.top,
     maxWord: options.maxWord,
   };
-
-  if (!options.validateOnly) {
-    return [requested];
-  }
 
   const generated = [
     {
@@ -472,6 +508,36 @@ function writeValidationFixture(name: string, content: string | Uint8Array) {
   const fixture = join(validationFixtures, `${name}.txt`);
   writeFileSync(fixture, content);
   return fixture;
+}
+
+function createBenchmarkFixture() {
+  const parts: string[] = [];
+
+  for (let index = 0; index < 32_000; index += 1) {
+    parts.push(
+      benchmarkWords[index % benchmarkWords.length],
+      benchmarkSeparators[index % benchmarkSeparators.length],
+    );
+  }
+  for (let index = 0; index < 8_000; index += 1) {
+    parts.push(
+      syntheticWord(index),
+      benchmarkSeparators[(index + 3) % benchmarkSeparators.length],
+    );
+  }
+
+  return `${parts.join("")}\n`;
+}
+
+function syntheticWord(value: number) {
+  const suffix = value % 5;
+  let number = value;
+  let word = "";
+  for (let index = 0; index < 8; index += 1) {
+    word += String.fromCharCode(97 + (number % 26));
+    number = Math.floor(number / 26);
+  }
+  return word + "x".repeat(suffix);
 }
 
 function parseDecimal(value: string, name: string) {
@@ -553,29 +619,67 @@ async function runJson(
   return JSON.parse(output) as JsonResult;
 }
 
-async function benchmark(
-  implementation: Implementation,
+async function benchmarkAll(
+  implementations: Implementation[],
   fixture: string,
   top: number,
   maxWord: number,
   runs: number,
   warmups: number,
-): Promise<number> {
-  const samples: number[] = [];
-  const command = implementation.run(fixture, top, maxWord);
-  const startupCommand = implementation.run(startupFixture, 1, 4);
+): Promise<Map<string, BenchmarkResult>> {
+  const states: BenchmarkState[] = implementations.map((implementation) => ({
+    implementation,
+    command: implementation.run(fixture, top, maxWord),
+    startupCommand: implementation.run(startupFixture, top, maxWord),
+    totalSamples: [],
+    startupSamples: [],
+    adjustedSamples: [],
+  }));
 
   for (let index = 0; index < warmups; index += 1) {
-    await run(command);
-    await run(startupCommand);
+    for (const state of rotated(states, index)) {
+      await run(state.command);
+      await run(state.startupCommand);
+    }
   }
 
   for (let index = 0; index < runs; index += 1) {
-    const totalMs = await timeRun(command);
-    const startupMs = await timeRun(startupCommand);
-    samples.push(Math.max(0, totalMs - startupMs));
+    for (const state of rotated(states, index)) {
+      const totalMs = await timeRun(state.command);
+      const startupMs = await timeRun(state.startupCommand);
+      state.totalSamples.push(totalMs);
+      state.startupSamples.push(startupMs);
+      state.adjustedSamples.push(Math.max(0, totalMs - startupMs));
+    }
   }
+
+  return new Map(
+    states.map((state) => [
+      state.implementation.name,
+      {
+        totalMeanMs: mean(state.totalSamples),
+        startupMeanMs: mean(state.startupSamples),
+        adjustedMeanMs: mean(state.adjustedSamples),
+        adjustedP95Ms: percentile(state.adjustedSamples, 0.95),
+      },
+    ]),
+  );
+}
+
+function rotated<T>(items: T[], offset: number) {
+  const start = offset % items.length;
+  return [...items.slice(start), ...items.slice(0, start)];
+}
+
+function mean(samples: number[]) {
   return samples.reduce((sum, sample) => sum + sample, 0) / samples.length;
+}
+
+function percentile(samples: number[], quantile: number) {
+  const sorted = [...samples].sort((left, right) => left - right);
+  return sorted[
+    Math.min(sorted.length - 1, Math.ceil(sorted.length * quantile) - 1)
+  ];
 }
 
 async function timeRun(command: Command): Promise<number> {
@@ -594,11 +698,9 @@ function assertSame(name: string, expected: JsonResult, actual: JsonResult) {
   }
 }
 
-function printSummary(
-  rows: { name: string; status: string; meanMs?: number }[],
-) {
-  const hasMeans = rows.some((row) => row.meanMs !== undefined);
-  if (!hasMeans) {
+function printSummary(rows: SummaryRow[]) {
+  const hasTimings = rows.some((row) => row.timing !== undefined);
+  if (!hasTimings) {
     console.log("| implementation | status |");
     console.log("|---|---:|");
     for (const row of rows) {
@@ -609,15 +711,18 @@ function printSummary(
 
   const displayRows = [...rows].sort(
     (left, right) =>
-      (left.meanMs ?? Number.POSITIVE_INFINITY) -
-      (right.meanMs ?? Number.POSITIVE_INFINITY),
+      (left.timing?.adjustedMeanMs ?? Number.POSITIVE_INFINITY) -
+      (right.timing?.adjustedMeanMs ?? Number.POSITIVE_INFINITY),
   );
 
-  console.log("| implementation | status | mean ms (startup-adjusted) |");
-  console.log("|---|---:|---:|");
+  console.log(
+    "| implementation | status | raw mean ms | startup mean ms | adjusted mean ms | adjusted p95 ms |",
+  );
+  console.log("|---|---:|---:|---:|---:|---:|");
   for (const row of displayRows) {
+    const timing = row.timing;
     console.log(
-      `| ${row.name} | ${row.status} | ${row.meanMs === undefined ? "" : row.meanMs.toFixed(3)} |`,
+      `| ${row.name} | ${row.status} | ${timing === undefined ? "" : timing.totalMeanMs.toFixed(3)} | ${timing === undefined ? "" : timing.startupMeanMs.toFixed(3)} | ${timing === undefined ? "" : timing.adjustedMeanMs.toFixed(3)} | ${timing === undefined ? "" : timing.adjustedP95Ms.toFixed(3)} |`,
     );
   }
 }

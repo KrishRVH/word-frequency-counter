@@ -8,6 +8,10 @@ use RuntimeException;
 
 final class WordCounter
 {
+    private const int ORACLE_DEFAULT_MAX_WORD = 64;
+    private const int MAX_WORD_LIMIT = 1024;
+    private const int MIN_WORD = 4;
+
     public function countFile(string $path, int $top, int $maxWord): Result
     {
         if (!is_file($path) || !is_readable($path)) {
@@ -24,6 +28,8 @@ final class WordCounter
 
     public function countBytes(string $bytes, int $top, int $maxWord): Result
     {
+        $maxWord = $this->normalizeMaxWord($maxWord);
+
         /**
          * @phpstan-var array<array-key, int> $counts
          * @psalm-var array<string, int> $counts
@@ -91,5 +97,14 @@ final class WordCounter
     private function lowerAscii(int $byte): int
     {
         return $byte >= 65 && $byte <= 90 ? $byte + 32 : $byte;
+    }
+
+    private function normalizeMaxWord(int $value): int
+    {
+        if ($value === 0) {
+            return self::ORACLE_DEFAULT_MAX_WORD;
+        }
+
+        return min(max($value, self::MIN_WORD), self::MAX_WORD_LIMIT);
     }
 }

@@ -6,7 +6,7 @@ LANG = "C.UTF-8"
 LC_ALL = "C.UTF-8"
 WFC_MAX_WORD = "1024"
 WFC_TOP = "10"
-WFC_FIXTURE = "fixtures/spec.txt"
+WFC_FIXTURE = "build/fixtures/benchmark.txt"
 
 [tools]
 bun = "1.3.14"

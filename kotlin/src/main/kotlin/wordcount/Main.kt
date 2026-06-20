@@ -6,7 +6,7 @@ import java.nio.file.Path
 
 private const val ORACLE_DEFAULT_MAX_WORD = 64
 private const val DEFAULT_TOP = 10
-private const val INITIAL_CAPACITY = 16_384
+private const val ESTIMATED_BYTES_PER_UNIQUE_WORD = 32
 private const val MAX_WORD = 1024
 private const val MIN_WORD = 4
 private const val ASCII_CASE_BIT = 32
@@ -29,7 +29,7 @@ fun countBytes(
     maxWord: Int,
 ): Result {
     val normalizedMaxWord = normalizeMaxWord(maxWord)
-    val counts = HashMap<String, Long>(INITIAL_CAPACITY)
+    val counts = HashMap<String, Long>(estimatedUniqueWords(bytes))
     val word = StringBuilder(minOf(normalizedMaxWord, ORACLE_DEFAULT_MAX_WORD))
     var total = 0L
 
@@ -91,6 +91,8 @@ private fun commitWord(
 private fun isLetter(byte: Int): Boolean = byte in 'A'.code..'Z'.code || byte in 'a'.code..'z'.code
 
 private fun lowerAscii(byte: Int): Int = if (byte in 'A'.code..'Z'.code) byte + ASCII_CASE_BIT else byte
+
+private fun estimatedUniqueWords(bytes: ByteArray): Int = bytes.size / ESTIMATED_BYTES_PER_UNIQUE_WORD
 
 private fun normalizeMaxWord(value: Int): Int =
     when {

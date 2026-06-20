@@ -7,10 +7,6 @@ package.path = script_path:gsub("/bin/wordcount%.lua$", "/src/?.lua")
 
 local wordcount = require("wordcount")
 
-local ORACLE_DEFAULT_MAX_WORD = 64
-local MAX_WORD = 1024
-local MIN_WORD = 4
-
 local function usage()
   io.stderr:write(
     "usage: lua/bin/wordcount.lua [--json] [--top N] [--max-word N] <file>\n"
@@ -26,13 +22,6 @@ local function parse_number(value)
     usage()
   end
   return number
-end
-
-local function normalize_max_word(value)
-  if value == 0 then
-    return ORACLE_DEFAULT_MAX_WORD
-  end
-  return math.min(math.max(value, MIN_WORD), MAX_WORD)
 end
 
 local function parse_next_number(args, index)
@@ -108,8 +97,6 @@ local function parse_args(args)
   if options.path == nil or options.top <= 0 then
     usage()
   end
-  options.max_word = normalize_max_word(options.max_word)
-
   return options
 end
 

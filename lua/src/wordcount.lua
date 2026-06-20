@@ -1,5 +1,9 @@
 local M = {}
 
+local ORACLE_DEFAULT_MAX_WORD = 64
+local MAX_WORD = 1024
+local MIN_WORD = 4
+
 local function is_letter(byte)
   return (byte >= 65 and byte <= 90) or (byte >= 97 and byte <= 122)
 end
@@ -11,7 +15,16 @@ local function lower_ascii(byte)
   return byte
 end
 
+local function normalize_max_word(value)
+  if value == 0 then
+    return ORACLE_DEFAULT_MAX_WORD
+  end
+  return math.min(math.max(value, MIN_WORD), MAX_WORD)
+end
+
 function M.count_bytes(bytes, top, max_word)
+  max_word = normalize_max_word(max_word)
+
   local counts = {}
   local word = {}
   local stored = 0

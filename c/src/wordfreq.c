@@ -7,7 +7,8 @@
 
 enum {
     DEFAULT_MAX_WORD = 64,
-    INITIAL_CAPACITY = 1024,
+    ESTIMATED_BYTES_PER_UNIQUE_WORD = 32,
+    INITIAL_CAPACITY = 16,
     MAX_WORD = 1024,
     MIN_WORD = 4
 };
@@ -65,6 +66,36 @@ static uint64_t hash_word(const unsigned char *bytes, size_t len)
     return hash;
 }
 
+static size_t estimated_unique_words(size_t len)
+{
+    return len / ESTIMATED_BYTES_PER_UNIQUE_WORD;
+}
+
+static size_t table_capacity_for(size_t expected)
+{
+    size_t needed = INITIAL_CAPACITY;
+
+    if (expected > 0u) {
+        if (expected > (SIZE_MAX - 6u) / 10u) {
+            return 0u;
+        }
+        needed = (expected * 10u + 6u) / 7u;
+        if (needed < INITIAL_CAPACITY) {
+            needed = INITIAL_CAPACITY;
+        }
+    }
+
+    size_t cap = INITIAL_CAPACITY;
+    while (cap < needed) {
+        if (cap > SIZE_MAX / 2u) {
+            return 0u;
+        }
+        cap *= 2u;
+    }
+
+    return cap;
+}
+
 static bool same_word(const Slot *slot, const unsigned char *bytes, size_t len)
 {
     if (slot->len != len) {
@@ -80,9 +111,8 @@ static bool same_word(const Slot *slot, const unsigned char *bytes, size_t len)
     return true;
 }
 
-static int table_grow(Table *table)
+static int table_resize(Table *table, size_t next_cap)
 {
-    size_t next_cap = table->cap == 0 ? INITIAL_CAPACITY : table->cap * 2u;
     Slot *next = calloc(next_cap, sizeof(*next));
 
     if (next == NULL) {
@@ -107,6 +137,17 @@ static int table_grow(Table *table)
     table->slots = next;
     table->cap = next_cap;
     return 0;
+}
+
+static int table_grow(Table *table)
+{
+    if (table->cap == 0u) {
+        return table_resize(table, INITIAL_CAPACITY);
+    }
+    if (table->cap > SIZE_MAX / 2u) {
+        return -1;
+    }
+    return table_resize(table, table->cap * 2u);
 }
 
 static int table_insert(Table *table, const unsigned char *bytes, size_t len)
@@ -204,9 +245,16 @@ int wf_count_bytes(const unsigned char *data,
 {
     Table table = { 0 };
     size_t cursor = 0;
+    size_t expected = estimated_unique_words(len);
 
     *result = (WfResult){ 0 };
     max_word = normalize_max_word(max_word);
+    if (expected > 0u) {
+        size_t capacity = table_capacity_for(expected);
+        if (capacity == 0u || table_resize(&table, capacity) != 0) {
+            return -1;
+        }
+    }
 
     while (cursor < len) {
         while (cursor < len && !is_letter(data[cursor])) {

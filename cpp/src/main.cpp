@@ -4,7 +4,6 @@
 #include <cstdio>
 #include <cstdint>
 #include <fstream>
-#include <iterator>
 #include <print>
 #include <stdexcept>
 #include <string>
@@ -17,6 +16,7 @@ namespace
 {
 
 constexpr auto default_max_word = std::size_t{ 64 };
+constexpr auto estimated_bytes_per_unique_word = std::size_t{ 32 };
 constexpr auto max_word_limit = std::size_t{ 1024 };
 constexpr auto min_word = std::size_t{ 4 };
 constexpr auto usage =
@@ -120,18 +120,33 @@ struct Options {
 [[nodiscard]] auto read_file(const std::string &path)
         -> std::vector<unsigned char>
 {
-    std::ifstream file{ path, std::ios::binary };
+    std::ifstream file{ path, std::ios::binary | std::ios::ate };
     if (!file) {
         throw std::runtime_error{ "cannot open input file" };
     }
 
-    auto bytes =
-            std::vector<unsigned char>{ std::istreambuf_iterator<char>{ file },
-                                        std::istreambuf_iterator<char>{} };
-    if (file.bad()) {
+    const auto size = file.tellg();
+    if (size < 0) {
         throw std::runtime_error{ "cannot read input file" };
     }
+
+    std::vector<unsigned char> bytes(static_cast<std::size_t>(size));
+    file.seekg(0);
+    if (!bytes.empty()) {
+        file.read(reinterpret_cast<char *>(bytes.data()),
+                  static_cast<std::streamsize>(bytes.size()));
+        if (!file) {
+            throw std::runtime_error{ "cannot read input file" };
+        }
+    }
+
     return bytes;
+}
+
+[[nodiscard]] auto
+estimated_unique_words(const std::vector<unsigned char> &bytes) -> std::size_t
+{
+    return bytes.size() / estimated_bytes_per_unique_word;
 }
 
 [[nodiscard]] auto count_words(const std::vector<unsigned char> &bytes,
@@ -143,7 +158,8 @@ struct Options {
     std::uint64_t total = 0;
 
     max_word = normalize_max_word(max_word);
-    word.reserve(std::min<std::size_t>(max_word, 64));
+    counts.reserve(estimated_unique_words(bytes));
+    word.reserve(std::min(max_word, default_max_word));
 
     for (const auto byte : bytes) {
         if (is_letter(byte)) {

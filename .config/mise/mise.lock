@@ -1063,13 +1063,6 @@ url = "https://builds.hex.pm/builds/otp/amd64/ubuntu-24.04/OTP-29.0.2.tar.gz"
 [tools.erlang."platforms.linux-x64-baseline"]
 url = "https://builds.hex.pm/builds/otp/amd64/ubuntu-24.04/OTP-29.0.2.tar.gz"
 
-[[tools.erlang]]
-version = "29.0.2"
-backend = "core:erlang"
-
-[tools.erlang.options]
-precompiled = "if_available"
-
 [[tools.ghcup]]
 version = "0.2.6.2"
 backend = "aqua:haskell/ghcup-hs"
@@ -1223,21 +1216,6 @@ url = "https://github.com/ndmitchell/hlint/releases/download/v3.10/hlint-3.10-x8
 url_api = "https://api.github.com/repos/ndmitchell/hlint/releases/assets/225694248"
 
 [[tools.java]]
-version = "26.0.1"
-backend = "core:java"
-
-[tools.java.options]
-shorthand_vendor = "openjdk"
-
-[tools.java."platforms.linux-x64"]
-checksum = "sha256:2f2802d57b5fc414f1ddf6648ba12cc9a6454cf67b32ac95407c018f2e6ab0b0"
-url = "https://download.java.net/java/GA/jdk26.0.1/458fda22e4c54d5ba572ab8d2b22eb83/8/GPL/openjdk-26.0.1_linux-x64_bin.tar.gz"
-
-[tools.java."platforms.linux-x64-baseline"]
-checksum = "sha256:2f2802d57b5fc414f1ddf6648ba12cc9a6454cf67b32ac95407c018f2e6ab0b0"
-url = "https://download.java.net/java/GA/jdk26.0.1/458fda22e4c54d5ba572ab8d2b22eb83/8/GPL/openjdk-26.0.1_linux-x64_bin.tar.gz"
-
-[[tools.java]]
 version = "22.0.2"
 backend = "core:java"
 
@@ -1251,6 +1229,21 @@ url = "https://download.java.net/java/GA/jdk22.0.2/c9ecb94cd31b495da20a27d458164
 [tools.java."platforms.linux-x64-baseline"]
 checksum = "sha256:41536f115668308ecf4eba92aaf6acaeb0936225828b741efd83b6173ba82963"
 url = "https://download.java.net/java/GA/jdk22.0.2/c9ecb94cd31b495da20a27d4581645e8/9/GPL/openjdk-22.0.2_linux-x64_bin.tar.gz"
+
+[[tools.java]]
+version = "26.0.1"
+backend = "core:java"
+
+[tools.java.options]
+shorthand_vendor = "openjdk"
+
+[tools.java."platforms.linux-x64"]
+checksum = "sha256:2f2802d57b5fc414f1ddf6648ba12cc9a6454cf67b32ac95407c018f2e6ab0b0"
+url = "https://download.java.net/java/GA/jdk26.0.1/458fda22e4c54d5ba572ab8d2b22eb83/8/GPL/openjdk-26.0.1_linux-x64_bin.tar.gz"
+
+[tools.java."platforms.linux-x64-baseline"]
+checksum = "sha256:2f2802d57b5fc414f1ddf6648ba12cc9a6454cf67b32ac95407c018f2e6ab0b0"
+url = "https://download.java.net/java/GA/jdk26.0.1/458fda22e4c54d5ba572ab8d2b22eb83/8/GPL/openjdk-26.0.1_linux-x64_bin.tar.gz"
 
 [[tools.kotlin]]
 version = "2.4.0"

@@ -42,15 +42,12 @@ internal static class Program {
 }
 
 internal sealed record Options(string Path, int Top, int MaxWord, bool Json) {
-    private const int DefaultMaxWord = 64;
-    private const int MaxWordLimit = 1024;
-    private const int MinWord = 4;
     private const string Usage = "usage: wordcount_csharp [--json] [--top N] [--max-word N] <file>";
 
     internal static Options Parse(IReadOnlyList<string> args) {
         string? path = null;
         int top = 10;
-        int maxWord = MaxWordLimit;
+        int maxWord = 1024;
         bool json = false;
 
         for (int index = 0; index < args.Count; index++) {
@@ -78,7 +75,7 @@ internal sealed record Options(string Path, int Top, int MaxWord, bool Json) {
             throw new ArgumentException(Usage);
         }
 
-        return new Options(path, top, NormalizeMaxWord(maxWord), json);
+        return new Options(path, top, maxWord, json);
     }
 
     private static int ParseValue(IReadOnlyList<string> args, int index, string name) {
@@ -96,11 +93,4 @@ internal sealed record Options(string Path, int Top, int MaxWord, bool Json) {
             : throw new ArgumentException($"{name} must be a number");
     }
 
-    private static int NormalizeMaxWord(int value) =>
-        value switch {
-            0 => DefaultMaxWord,
-            < MinWord => MinWord,
-            > MaxWordLimit => MaxWordLimit,
-            _ => value,
-        };
 }

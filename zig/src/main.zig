@@ -2,6 +2,7 @@ const std = @import("std");
 const Io = std.Io;
 
 const default_max_word: usize = 64;
+const estimated_bytes_per_unique_word: usize = 32;
 const max_word_limit: usize = 1024;
 const min_word: usize = 4;
 
@@ -99,6 +100,9 @@ fn countBytes(allocator: std.mem.Allocator, bytes: []const u8, top: usize, max_w
     var total: u64 = 0;
     const normalized_max_word = normalizeMaxWord(max_word);
 
+    try counts.ensureTotalCapacity(estimatedUniqueWords(bytes));
+    try word.ensureTotalCapacity(allocator, @min(normalized_max_word, default_max_word));
+
     for (bytes) |byte| {
         if (std.ascii.isAlphabetic(byte)) {
             if (word.items.len < normalized_max_word) {
@@ -115,6 +119,7 @@ fn countBytes(allocator: std.mem.Allocator, bytes: []const u8, top: usize, max_w
     }
 
     var entries: std.ArrayList(Entry) = .empty;
+    try entries.ensureTotalCapacity(allocator, counts.count());
     var iterator = counts.iterator();
     while (iterator.next()) |kv| {
         try entries.append(allocator, .{ .word = kv.key_ptr.*, .count = kv.value_ptr.* });
@@ -126,6 +131,11 @@ fn countBytes(allocator: std.mem.Allocator, bytes: []const u8, top: usize, max_w
     }
 
     return .{ .total = total, .unique = counts.count(), .top = entries.items };
+}
+
+fn estimatedUniqueWords(bytes: []const u8) u32 {
+    const estimate = bytes.len / estimated_bytes_per_unique_word;
+    return @intCast(@min(estimate, std.math.maxInt(u32)));
 }
 
 fn normalizeMaxWord(value: usize) usize {

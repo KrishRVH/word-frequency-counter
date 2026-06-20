@@ -1,12 +1,11 @@
 package wordcount
 
 import (
-	"bufio"
 	"io"
 	"sort"
 )
 
-const readBufferSize = 64 * 1024
+const estimatedBytesPerUniqueWord = 32
 
 const (
 	defaultMaxWord = 64
@@ -26,21 +25,17 @@ type Result struct {
 }
 
 func Count(reader io.Reader, maxWord int) (Result, error) {
-	counts := make(map[string]uint64, 16_384)
-	buffered := bufio.NewReaderSize(reader, readBufferSize)
-	word := make([]byte, 0, defaultMaxWord)
-	total := uint64(0)
+	bytes, err := io.ReadAll(reader)
+	if err != nil {
+		return Result{}, err
+	}
+
 	maxWord = NormalizeMaxWord(maxWord)
+	counts := make(map[string]uint64, estimatedUniqueWords(bytes))
+	word := make([]byte, 0, min(maxWord, defaultMaxWord))
+	total := uint64(0)
 
-	for {
-		byteValue, err := buffered.ReadByte()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return Result{}, err
-		}
-
+	for _, byteValue := range bytes {
 		if isLetter(byteValue) {
 			if len(word) < maxWord {
 				word = append(word, lowerASCII(byteValue))
@@ -61,6 +56,10 @@ func Count(reader io.Reader, maxWord int) (Result, error) {
 	}
 
 	return Result{Total: total, Unique: len(counts), Counts: counts}, nil
+}
+
+func estimatedUniqueWords(bytes []byte) int {
+	return len(bytes) / estimatedBytesPerUniqueWord
 }
 
 func Top(result Result, limit int) []Entry {

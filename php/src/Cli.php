@@ -9,9 +9,6 @@ use Throwable;
 
 final class Cli
 {
-    private const int ORACLE_DEFAULT_MAX_WORD = 64;
-    private const int MAX_WORD_LIMIT = 1024;
-    private const int MIN_WORD = 4;
     private const string USAGE = "usage: php/bin/wordcount [--json] [--top N] [--max-word N] <file>\n";
 
     /**
@@ -103,7 +100,7 @@ final class Cli
             throw new InvalidArgumentException('invalid options');
         }
 
-        return new CliOptions($path, $top, self::normalizeMaxWord($maxWord), $json);
+        return new CliOptions($path, $top, $maxWord, $json);
     }
 
     /**
@@ -143,15 +140,6 @@ final class Cli
         }
 
         return $parsed;
-    }
-
-    private static function normalizeMaxWord(int $value): int
-    {
-        if ($value === 0) {
-            return self::ORACLE_DEFAULT_MAX_WORD;
-        }
-
-        return min(max($value, self::MIN_WORD), self::MAX_WORD_LIMIT);
     }
 
     private static function renderJson(Result $result): string
