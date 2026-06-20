@@ -1086,6 +1086,34 @@ url = "https://downloads.haskell.org/~ghcup/0.2.6.2/x86_64-linux-ghcup-0.2.6.2"
 [tools.ghcup."platforms.linux-x64-musl-baseline"]
 url = "https://downloads.haskell.org/~ghcup/0.2.6.2/x86_64-linux-ghcup-0.2.6.2"
 
+[[tools."github:composer/composer"]]
+version = "2.10.1"
+backend = "github:composer/composer"
+
+[tools."github:composer/composer"."platforms.linux-x64"]
+checksum = "sha256:345b9c6a98da5c30dcbd4b0d99fc8710bf0ae98a3898eea18f7b2ad9dec93f06"
+url = "https://github.com/composer/composer/releases/download/2.10.1/composer.phar"
+url_api = "https://api.github.com/repos/composer/composer/releases/assets/438095381"
+provenance = "github-attestations"
+
+[tools."github:composer/composer"."platforms.linux-x64-baseline"]
+checksum = "sha256:345b9c6a98da5c30dcbd4b0d99fc8710bf0ae98a3898eea18f7b2ad9dec93f06"
+url = "https://github.com/composer/composer/releases/download/2.10.1/composer.phar"
+url_api = "https://api.github.com/repos/composer/composer/releases/assets/438095381"
+provenance = "github-attestations"
+
+[tools."github:composer/composer"."platforms.linux-x64-musl"]
+checksum = "sha256:345b9c6a98da5c30dcbd4b0d99fc8710bf0ae98a3898eea18f7b2ad9dec93f06"
+url = "https://github.com/composer/composer/releases/download/2.10.1/composer.phar"
+url_api = "https://api.github.com/repos/composer/composer/releases/assets/438095381"
+provenance = "github-attestations"
+
+[tools."github:composer/composer"."platforms.linux-x64-musl-baseline"]
+checksum = "sha256:345b9c6a98da5c30dcbd4b0d99fc8710bf0ae98a3898eea18f7b2ad9dec93f06"
+url = "https://github.com/composer/composer/releases/download/2.10.1/composer.phar"
+url_api = "https://api.github.com/repos/composer/composer/releases/assets/438095381"
+provenance = "github-attestations"
+
 [[tools.go]]
 version = "1.26.4"
 backend = "core:go"
@@ -1208,6 +1236,21 @@ url = "https://download.java.net/java/GA/jdk26.0.1/458fda22e4c54d5ba572ab8d2b22e
 [tools.java."platforms.linux-x64-baseline"]
 checksum = "sha256:2f2802d57b5fc414f1ddf6648ba12cc9a6454cf67b32ac95407c018f2e6ab0b0"
 url = "https://download.java.net/java/GA/jdk26.0.1/458fda22e4c54d5ba572ab8d2b22eb83/8/GPL/openjdk-26.0.1_linux-x64_bin.tar.gz"
+
+[[tools.java]]
+version = "22.0.2"
+backend = "core:java"
+
+[tools.java.options]
+shorthand_vendor = "openjdk"
+
+[tools.java."platforms.linux-x64"]
+checksum = "sha256:41536f115668308ecf4eba92aaf6acaeb0936225828b741efd83b6173ba82963"
+url = "https://download.java.net/java/GA/jdk22.0.2/c9ecb94cd31b495da20a27d4581645e8/9/GPL/openjdk-22.0.2_linux-x64_bin.tar.gz"
+
+[tools.java."platforms.linux-x64-baseline"]
+checksum = "sha256:41536f115668308ecf4eba92aaf6acaeb0936225828b741efd83b6173ba82963"
+url = "https://download.java.net/java/GA/jdk22.0.2/c9ecb94cd31b495da20a27d4581645e8/9/GPL/openjdk-22.0.2_linux-x64_bin.tar.gz"
 
 [[tools.kotlin]]
 version = "2.4.0"
