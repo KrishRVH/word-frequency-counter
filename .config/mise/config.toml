@@ -22,7 +22,7 @@ golangci-lint = "2.12.2"
 gradle = "9.6.0"
 ghcup = "0.2.6.2"
 hlint = "3.10"
-java = "26.0.1"
+java = ["26.0.1", "22.0.2"]
 kotlin = "2.4.0"
 ktlint = "1.8.0"
 lua = "5.5.0"
@@ -37,6 +37,7 @@ rust = "1.96.0"
 stylua = "2.5.2"
 taplo = "0.10.0"
 zig = "0.16.0"
+"github:composer/composer" = "2.10.1"
 "go:golang.org/x/vuln/cmd/govulncheck" = "1.4.0"
 "conda:clangxx" = "22.1.8"
 "conda:clang-tools" = "22.1.8"
@@ -58,7 +59,8 @@ cargo fmt --manifest-path rust/Cargo.toml --all
 (cd go && gofumpt -w .)
 prettier --write --cache --list-different README.md scripts/*.ts
 (cd javascript && bun install --frozen-lockfile && bun run format:fix)
-(cd php && composer install --quiet --no-interaction && composer normalize && composer fmt)
+composer_phar="$(mise where github:composer/composer)/composer.phar"
+(cd php && php "$composer_phar" install --quiet --no-interaction && php "$composer_phar" normalize && php "$composer_phar" fmt)
 stylua lua
 dotnet format csharp/src/WordFrequencyCounter/WordFrequencyCounter.csproj
 ktlint -F 'kotlin/**/*.kt' 'kotlin/**/*.kts'
@@ -77,7 +79,8 @@ cargo fmt --manifest-path rust/Cargo.toml --all -- --check
 (cd go && test -z "$(gofumpt -l .)")
 prettier --check README.md scripts/*.ts
 (cd javascript && bun install --frozen-lockfile && bun run format:check)
-(cd php && composer install --quiet --no-interaction && composer normalize:check && composer phpcs)
+composer_phar="$(mise where github:composer/composer)/composer.phar"
+(cd php && php "$composer_phar" install --quiet --no-interaction && php "$composer_phar" normalize:check && php "$composer_phar" phpcs)
 stylua --check lua
 dotnet format csharp/src/WordFrequencyCounter/WordFrequencyCounter.csproj --verify-no-changes
 ktlint 'kotlin/**/*.kt' 'kotlin/**/*.kts'
@@ -97,7 +100,8 @@ clang-tidy --extra-arg=-resource-dir="$clang_tidy_resource" c/src/wordfreq.c c/s
 cargo clippy --manifest-path rust/Cargo.toml --all-targets --all-features -- -D warnings
 (cd go && go vet ./... && golangci-lint run ./... && govulncheck ./...)
 (cd javascript && bun install --frozen-lockfile && bun run lint:check && bun run typecheck && node --check src/wordcount.js)
-(cd php && composer install --quiet --no-interaction && composer check)
+composer_phar="$(mise where github:composer/composer)/composer.phar"
+(cd php && php "$composer_phar" install --quiet --no-interaction && php "$composer_phar" check)
 dotnet build csharp/src/WordFrequencyCounter/WordFrequencyCounter.csproj -warnaserror
 mise x lua@5.4.8 -- sh -lc '
   if [ ! -x .lua_modules54/bin/luacheck ]; then
