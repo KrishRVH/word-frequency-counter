@@ -2,12 +2,13 @@
 // @ts-check
 
 import { readFileSync } from "node:fs";
+import { performance } from "node:perf_hooks";
 import { pathToFileURL } from "node:url";
 
 /**
  * @typedef {{ word: string, count: number }} Entry
  * @typedef {{ total: number, unique: number, top: Entry[] }} Result
- * @typedef {{ path: string, top: number, maxWord: number, json: boolean }} Options
+ * @typedef {{ path: string, top: number, maxWord: number, benchRuns: number, benchWarmups: number, json: boolean }} Options
  */
 
 const oracleDefaultMaxWord = 64;
@@ -108,6 +109,8 @@ function parseArgs(args) {
   let path;
   let top = 10;
   let maxWord = maxWordLimit;
+  let benchRuns = 0;
+  let benchWarmups = 0;
   let json = false;
 
   for (let index = 0; index < args.length; index += 1) {
@@ -128,6 +131,16 @@ function parseArgs(args) {
       maxWord = parseNumber(args[index]);
     } else if (arg.startsWith("--max-word=")) {
       maxWord = parseNumber(arg.slice("--max-word=".length));
+    } else if (arg === "--bench-runs") {
+      index += 1;
+      benchRuns = parseNumber(args[index]);
+    } else if (arg.startsWith("--bench-runs=")) {
+      benchRuns = parseNumber(arg.slice("--bench-runs=".length));
+    } else if (arg === "--bench-warmups") {
+      index += 1;
+      benchWarmups = parseNumber(args[index]);
+    } else if (arg.startsWith("--bench-warmups=")) {
+      benchWarmups = parseNumber(arg.slice("--bench-warmups=".length));
     } else if (arg.startsWith("-")) {
       throw new Error(usage);
     } else if (path === undefined) {
@@ -141,12 +154,21 @@ function parseArgs(args) {
     path === undefined ||
     !Number.isInteger(top) ||
     top <= 0 ||
-    !Number.isInteger(maxWord)
+    !Number.isInteger(maxWord) ||
+    !Number.isInteger(benchRuns) ||
+    !Number.isInteger(benchWarmups)
   ) {
     throw new Error(usage);
   }
 
-  return { path, top, maxWord: normalizeMaxWord(maxWord), json };
+  return {
+    path,
+    top,
+    maxWord: normalizeMaxWord(maxWord),
+    benchRuns,
+    benchWarmups,
+    json,
+  };
 }
 
 /**
@@ -172,18 +194,51 @@ function normalizeMaxWord(value) {
   return Math.min(Math.max(value, minWord), maxWordLimit);
 }
 
+/**
+ * @param {Uint8Array} bytes
+ * @param {Options} options
+ * @returns {string}
+ */
+function renderBench(bytes, options) {
+  for (let index = 0; index < options.benchWarmups; index += 1) {
+    checksum(countWords(bytes, options.top, options.maxWord));
+  }
+
+  let checksumValue = 0;
+  const started = performance.now();
+  for (let index = 0; index < options.benchRuns; index += 1) {
+    checksumValue ^= checksum(countWords(bytes, options.top, options.maxWord));
+  }
+  const meanMs = (performance.now() - started) / options.benchRuns;
+
+  return `${JSON.stringify({ mean_ms: meanMs, checksum: checksumValue })}\n`;
+}
+
+/**
+ * @param {Result} result
+ * @returns {number}
+ */
+function checksum(result) {
+  return result.top.reduce(
+    (value, entry) => value ^ entry.count ^ entry.word.length,
+    result.total ^ result.unique,
+  );
+}
+
 const invokedUrl = process.argv[1] && pathToFileURL(process.argv[1]).href;
 if (import.meta.url === invokedUrl) {
   try {
     const options = parseArgs(process.argv.slice(2));
-    const result = countWords(
-      readFileSync(options.path),
-      options.top,
-      options.maxWord,
-    );
-    process.stdout.write(
-      options.json ? `${JSON.stringify(result)}\n` : renderText(result),
-    );
+    const bytes = readFileSync(options.path);
+    if (options.benchRuns > 0) {
+      process.stdout.write(renderBench(bytes, options));
+      process.exitCode = 0;
+    } else {
+      const result = countWords(bytes, options.top, options.maxWord);
+      process.stdout.write(
+        options.json ? `${JSON.stringify(result)}\n` : renderText(result),
+      );
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     process.stderr.write(`wordcount_js: ${message}\n`);

@@ -11,6 +11,7 @@ private const val MAX_WORD = 1024
 private const val MIN_WORD = 4
 private const val ASCII_CASE_BIT = 32
 private const val BYTE_MASK = 0xff
+private const val NANOS_PER_MILLISECOND = 1_000_000.0
 
 data class Entry(
     val word: String,
@@ -29,7 +30,7 @@ fun countBytes(
     maxWord: Int,
 ): Result {
     val normalizedMaxWord = normalizeMaxWord(maxWord)
-    val counts = HashMap<String, Long>(estimatedUniqueWords(bytes))
+    val counts = HashMap<String, Long>(bytes.size / ESTIMATED_BYTES_PER_UNIQUE_WORD)
     val word = StringBuilder(minOf(normalizedMaxWord, ORACLE_DEFAULT_MAX_WORD))
     var total = 0L
 
@@ -66,8 +67,13 @@ fun countBytes(
 fun main(args: Array<String>) {
     try {
         val options = Options.parse(args)
-        val result = countBytes(Files.readAllBytes(Path.of(options.path)), options.top, options.maxWord)
-        print(if (options.json) renderJson(result) else renderText(result))
+        val bytes = Files.readAllBytes(Path.of(options.path))
+        if (options.benchRuns > 0) {
+            print(renderBench(bytes, options))
+        } else {
+            val result = countBytes(bytes, options.top, options.maxWord)
+            print(if (options.json) renderJson(result) else renderText(result))
+        }
     } catch (error: IllegalArgumentException) {
         System.err.println("wordcount_kotlin: ${error.message}")
         kotlin.system.exitProcess(2)
@@ -92,8 +98,6 @@ private fun isLetter(byte: Int): Boolean = byte in 'A'.code..'Z'.code || byte in
 
 private fun lowerAscii(byte: Int): Int = if (byte in 'A'.code..'Z'.code) byte + ASCII_CASE_BIT else byte
 
-private fun estimatedUniqueWords(bytes: ByteArray): Int = bytes.size / ESTIMATED_BYTES_PER_UNIQUE_WORD
-
 private fun normalizeMaxWord(value: Int): Int =
     when {
         value == 0 -> ORACLE_DEFAULT_MAX_WORD
@@ -117,10 +121,38 @@ private fun renderText(result: Result): String =
         appendLine("unique ${result.unique}")
     }
 
+private fun renderBench(
+    bytes: ByteArray,
+    options: Options,
+): String {
+    var checksumValue = 0L
+    repeat(options.benchWarmups) {
+        checksumValue = checksumValue xor checksum(countBytes(bytes, options.top, options.maxWord))
+    }
+
+    val started = System.nanoTime()
+    repeat(options.benchRuns) {
+        checksumValue = checksumValue xor checksum(countBytes(bytes, options.top, options.maxWord))
+    }
+    val meanMs = (System.nanoTime() - started).toDouble() / NANOS_PER_MILLISECOND / options.benchRuns
+
+    return """{"mean_ms":${"%.6f".format(meanMs)},"checksum":$checksumValue}""" + "\n"
+}
+
+private fun checksum(result: Result): Long {
+    var checksum = result.total xor result.unique.toLong()
+    for (entry in result.top) {
+        checksum = checksum xor entry.count xor entry.word.length.toLong()
+    }
+    return checksum
+}
+
 private data class Options(
     val path: String,
     val top: Int,
     val maxWord: Int,
+    val benchRuns: Int,
+    val benchWarmups: Int,
     val json: Boolean,
 ) {
     companion object {
@@ -128,6 +160,8 @@ private data class Options(
             var path: String? = null
             var top = DEFAULT_TOP
             var maxWord = MAX_WORD
+            var benchRuns = 0
+            var benchWarmups = 0
             var json = false
             var index = 0
 
@@ -139,6 +173,8 @@ private data class Options(
                     arg.startsWith("--top=") -> top = parseNumber(arg.substringAfter("="))
                     arg == "--max-word" -> maxWord = parseNumber(args.getOrNull(++index))
                     arg.startsWith("--max-word=") -> maxWord = parseNumber(arg.substringAfter("="))
+                    arg == "--bench-runs" -> benchRuns = parseNumber(args.getOrNull(++index))
+                    arg == "--bench-warmups" -> benchWarmups = parseNumber(args.getOrNull(++index))
                     arg.startsWith("-") -> usage()
                     path == null -> path = arg
                     else -> usage()
@@ -149,7 +185,7 @@ private data class Options(
             if (path == null || top <= 0) {
                 usage()
             }
-            return Options(path, top, normalizeMaxWord(maxWord), json)
+            return Options(path, top, normalizeMaxWord(maxWord), benchRuns, benchWarmups, json)
         }
 
         private fun parseNumber(value: String?): Int =

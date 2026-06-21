@@ -86,9 +86,12 @@ LTO-only benchmark profiles, PGO, `-march=native`, or fixture-specific
 shortcuts.
 
 The harness times built release artifacts when a language normally produces one,
-uses the same `--top` and `--max-word` for the startup baseline, and reports raw,
-startup, adjusted mean, and adjusted p95 timings. That keeps runtime startup
-visible instead of pretending it vanished.
+uses the same `--top` and `--max-word` for every timing, and sorts the summary by
+`warm task mean ms`: an already-running, in-process proxy where the fixture is
+read once, the counting function is warmed, and repeated count calls are timed
+inside the language runtime. Raw CLI, startup, and adjusted CLI timings stay
+visible because runtime-heavy languages can spend most of their wall time before
+the scanner does meaningful work.
 
 ## Implementations
 
@@ -115,29 +118,29 @@ Last local run:
 mise run bench -- --runs=10 --warmups=5
 ```
 
-| implementation | status | raw mean ms | startup mean ms | adjusted mean ms | adjusted p95 ms |
-| -------------- | -----: | ----------: | --------------: | ---------------: | --------------: |
-| rust           |     ok |       2.295 |           0.748 |            1.546 |           1.711 |
-| c              |     ok |       2.524 |           0.710 |            1.813 |           2.057 |
-| zig            |     ok |       2.604 |           0.750 |            1.854 |           2.176 |
-| cpp            |     ok |       3.022 |           1.135 |            1.886 |           2.067 |
-| go             |     ok |       4.148 |           1.405 |            2.743 |           3.242 |
-| haskell        |     ok |       7.235 |           1.355 |            5.880 |           6.229 |
-| csharp         |     ok |      53.541 |          42.618 |           10.923 |          12.165 |
-| elixir         |     ok |     253.144 |         242.038 |           11.106 |          21.506 |
-| javascript     |     ok |      33.081 |          18.166 |           14.914 |          16.905 |
-| php            |     ok |      34.639 |          10.963 |           23.677 |          24.718 |
-| kotlin         |     ok |      95.793 |          60.559 |           35.233 |          40.514 |
-| lua            |     ok |      39.592 |           1.242 |           38.351 |          39.783 |
+| implementation | warm task mean ms | raw CLI mean ms | startup mean ms | adjusted CLI mean ms | adjusted CLI p95 ms |
+| -------------- | ----------------: | --------------: | --------------: | -------------------: | ------------------: |
+| rust           |             1.355 |           2.344 |           0.720 |                1.625 |               1.801 |
+| zig            |             1.408 |           2.478 |           0.751 |                1.727 |               1.887 |
+| c              |             1.538 |           2.483 |           0.671 |                1.812 |               1.995 |
+| cpp            |             1.564 |           3.012 |           1.105 |                1.907 |               2.124 |
+| go             |             2.445 |           4.337 |           1.386 |                2.951 |               4.167 |
+| kotlin         |             2.577 |          93.361 |          61.441 |               31.919 |              36.140 |
+| csharp         |             3.686 |          53.327 |          43.164 |               10.162 |              11.844 |
+| haskell        |             4.077 |           7.300 |           1.374 |                5.926 |               6.648 |
+| javascript     |             5.233 |          33.136 |          17.534 |               15.601 |              17.450 |
+| elixir         |            11.758 |         253.877 |         239.100 |               14.776 |              24.231 |
+| php            |            22.682 |          34.936 |          10.715 |               24.220 |              25.072 |
+| lua            |            33.951 |          40.420 |           1.229 |               39.191 |              41.236 |
 
-Interpret `adjusted mean ms` as the implementation timing after subtracting the
-empty-fixture command baseline, not as whole-command time. The harness builds
-first, validates the requested fixture and generated edge-case fixtures against
-`tokenfreq-c99`, runs warmups for every implementation, then times interleaved
-samples of both the requested fixture and an empty-fixture invocation with the
-same command options. The raw and startup columns are kept visible because
-runtime-heavy languages can spend most of their wall time before the scanner does
-meaningful work.
+Interpret `warm task mean ms` as the closest benchmark here to an already-running
+service or application doing this task in the middle of a larger workload. It
+does not include process startup or file reads. Interpret `adjusted CLI mean ms`
+as whole-command timing after subtracting the empty-fixture command baseline, not
+as the primary in-process result. The harness builds first, validates the
+requested fixture and generated edge-case fixtures against `tokenfreq-c99`, runs
+warmups for every implementation, then times interleaved samples of both the
+requested fixture and an empty-fixture invocation with the same command options.
 
 ## Commands
 
@@ -159,7 +162,7 @@ mise run clean
 Useful benchmark options:
 
 ```sh
-mise run bench -- --fixture=fixtures/spec.txt --top=10 --max-word=1024 --runs=5 --warmups=3
+mise run bench -- --fixture=fixtures/spec.txt --top=10 --max-word=1024 --runs=5 --warmups=3 --warm-task-runs=50 --warm-task-warmups=10
 mise run validate
 ```
 

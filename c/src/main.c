@@ -6,11 +6,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 typedef struct {
     const char *path;
     size_t top;
     size_t max_word;
+    size_t bench_runs;
+    size_t bench_warmups;
     bool json;
 } Options;
 
@@ -61,30 +64,54 @@ static int parse_prefixed_size(const char *arg, size_t *out)
     if (strncmp(arg, "--max-word=", 11u) == 0) {
         return parse_size(arg + 11u, out);
     }
+    if (strncmp(arg, "--bench-runs=", 13u) == 0) {
+        return parse_size(arg + 13u, out);
+    }
+    if (strncmp(arg, "--bench-warmups=", 16u) == 0) {
+        return parse_size(arg + 16u, out);
+    }
     return 1;
 }
 
 static int parse_options(int argc, char **argv, Options *options)
 {
-    *options = (Options){
-        .path = NULL, .top = 10u, .max_word = 1024u, .json = false
-    };
+    *options = (Options){ .path = NULL,
+                          .top = 10u,
+                          .max_word = 1024u,
+                          .bench_runs = 0u,
+                          .bench_warmups = 0u,
+                          .json = false };
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--json") == 0) {
             options->json = true;
         } else if (strcmp(argv[i], "--top") == 0 ||
-                   strcmp(argv[i], "--max-word") == 0) {
-            size_t *target = strcmp(argv[i], "--top") == 0 ? &options->top
-                                                           : &options->max_word;
+                   strcmp(argv[i], "--max-word") == 0 ||
+                   strcmp(argv[i], "--bench-runs") == 0 ||
+                   strcmp(argv[i], "--bench-warmups") == 0) {
+            size_t *target = &options->top;
+            if (strcmp(argv[i], "--max-word") == 0) {
+                target = &options->max_word;
+            } else if (strcmp(argv[i], "--bench-runs") == 0) {
+                target = &options->bench_runs;
+            } else if (strcmp(argv[i], "--bench-warmups") == 0) {
+                target = &options->bench_warmups;
+            }
             if (parse_separate_size(argc, argv, &i, target) != 0) {
                 return -1;
             }
         } else if (strncmp(argv[i], "--top=", 6u) == 0 ||
-                   strncmp(argv[i], "--max-word=", 11u) == 0) {
+                   strncmp(argv[i], "--max-word=", 11u) == 0 ||
+                   strncmp(argv[i], "--bench-runs=", 13u) == 0 ||
+                   strncmp(argv[i], "--bench-warmups=", 16u) == 0) {
             size_t *target = strncmp(argv[i], "--top=", 6u) == 0
                                      ? &options->top
                                      : &options->max_word;
+            if (strncmp(argv[i], "--bench-runs=", 13u) == 0) {
+                target = &options->bench_runs;
+            } else if (strncmp(argv[i], "--bench-warmups=", 16u) == 0) {
+                target = &options->bench_warmups;
+            }
             if (parse_prefixed_size(argv[i], target) != 0) {
                 return -1;
             }
@@ -162,6 +189,55 @@ static void print_table(const WfResult *result, size_t top)
     printf("total %" PRIu64 "\nunique %zu\n", result->total, result->unique);
 }
 
+static double now_ms(void)
+{
+    struct timespec time;
+    (void)timespec_get(&time, TIME_UTC);
+    return (double)time.tv_sec * 1000.0 + (double)time.tv_nsec / 1000000.0;
+}
+
+static uint64_t checksum_result(const WfResult *result, size_t top)
+{
+    size_t limit = result->unique < top ? result->unique : top;
+    uint64_t checksum = result->total ^ (uint64_t)result->unique;
+
+    for (size_t i = 0; i < limit; i++) {
+        checksum ^= result->entries[i].count ^
+                    (uint64_t)strlen(result->entries[i].word);
+    }
+
+    return checksum;
+}
+
+static int
+print_bench(const unsigned char *data, size_t len, const Options *options)
+{
+    uint64_t checksum = 0u;
+
+    for (size_t i = 0; i < options->bench_warmups; i++) {
+        WfResult result = { 0 };
+        if (wf_count_bytes(data, len, options->max_word, &result) != 0) {
+            return -1;
+        }
+        checksum ^= checksum_result(&result, options->top);
+        wf_result_free(&result);
+    }
+
+    double started = now_ms();
+    for (size_t i = 0; i < options->bench_runs; i++) {
+        WfResult result = { 0 };
+        if (wf_count_bytes(data, len, options->max_word, &result) != 0) {
+            return -1;
+        }
+        checksum ^= checksum_result(&result, options->top);
+        wf_result_free(&result);
+    }
+    double mean_ms = (now_ms() - started) / (double)options->bench_runs;
+
+    printf("{\"mean_ms\":%.6f,\"checksum\":%" PRIu64 "}\n", mean_ms, checksum);
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     Options options;
@@ -180,6 +256,16 @@ int main(int argc, char **argv)
                       options.path,
                       strerror(errno));
         return 1;
+    }
+
+    if (options.bench_runs > 0u) {
+        if (print_bench(data, len, &options) != 0) {
+            (void)fprintf(stderr, "wordcount_c: out of memory\n");
+            free(data);
+            return 1;
+        }
+        free(data);
+        return 0;
     }
 
     if (wf_count_bytes(data, len, options.max_word, &result) != 0) {

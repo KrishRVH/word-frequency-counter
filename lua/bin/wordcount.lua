@@ -45,6 +45,14 @@ local option_handlers = {
     options.max_word, index = parse_next_number(args, index)
     return index
   end,
+  ["--bench-runs"] = function(args, index, options)
+    options.bench_runs, index = parse_next_number(args, index)
+    return index
+  end,
+  ["--bench-warmups"] = function(args, index, options)
+    options.bench_warmups, index = parse_next_number(args, index)
+    return index
+  end,
 }
 
 local function parse_prefixed_option(arg, options)
@@ -57,6 +65,18 @@ local function parse_prefixed_option(arg, options)
   local max_word = arg:match("^%-%-max%-word=(.+)$")
   if max_word ~= nil then
     options.max_word = parse_number(max_word)
+    return true
+  end
+
+  local bench_runs = arg:match("^%-%-bench%-runs=(.+)$")
+  if bench_runs ~= nil then
+    options.bench_runs = parse_number(bench_runs)
+    return true
+  end
+
+  local bench_warmups = arg:match("^%-%-bench%-warmups=(.+)$")
+  if bench_warmups ~= nil then
+    options.bench_warmups = parse_number(bench_warmups)
     return true
   end
 
@@ -87,7 +107,14 @@ local function parse_arg(args, index, options)
 end
 
 local function parse_args(args)
-  local options = { json = false, top = 10, max_word = 1024, path = nil }
+  local options = {
+    json = false,
+    top = 10,
+    max_word = 1024,
+    bench_runs = 0,
+    bench_warmups = 0,
+    path = nil,
+  }
   local index = 1
 
   while index <= #args do
@@ -140,14 +167,45 @@ local function render_text(result)
   return table.concat(lines, "\n") .. "\n"
 end
 
+local function checksum(result)
+  local value = result.total + result.unique
+  for _, entry in ipairs(result.top) do
+    value = (value + entry.count + #entry.word) % 2147483647
+  end
+  return value
+end
+
+local function render_bench(bytes, options)
+  for _ = 1, options.bench_warmups do
+    checksum(wordcount.count_bytes(bytes, options.top, options.max_word))
+  end
+
+  local checksum_value = 0
+  local started = os.clock()
+  for _ = 1, options.bench_runs do
+    checksum_value = (
+      checksum_value
+      + checksum(wordcount.count_bytes(bytes, options.top, options.max_word))
+    ) % 2147483647
+  end
+  local mean_ms = (os.clock() - started) * 1000 / options.bench_runs
+
+  return string.format(
+    '{"mean_ms":%.6f,"checksum":%d}\n',
+    mean_ms,
+    checksum_value
+  )
+end
+
 local ok, err = pcall(function()
   local options = parse_args(arg)
-  local result = wordcount.count_bytes(
-    read_file(options.path),
-    options.top,
-    options.max_word
-  )
-  io.write(options.json and render_json(result) or render_text(result))
+  local bytes = read_file(options.path)
+  if options.bench_runs > 0 then
+    io.write(render_bench(bytes, options))
+  else
+    local result = wordcount.count_bytes(bytes, options.top, options.max_word)
+    io.write(options.json and render_json(result) or render_text(result))
+  end
 end)
 
 if not ok then

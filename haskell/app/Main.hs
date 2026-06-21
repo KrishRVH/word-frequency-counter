@@ -2,22 +2,28 @@
 
 module Main (main) where
 
-import Control.Exception (IOException, try)
+import Control.Exception (IOException, evaluate, try)
+import Control.Monad (foldM, forM_)
+import Data.Bits (xor)
 import Data.ByteString qualified as ByteString
 import Data.ByteString.Char8 qualified as Char8
 import Data.Char (isDigit)
 import Data.List (intercalate, isPrefixOf, sortBy, stripPrefix)
 import Data.Map.Strict qualified as Map
 import Data.Word (Word8)
+import GHC.Clock (getMonotonicTimeNSec)
 import System.Environment (getArgs)
 import System.Exit (ExitCode (ExitFailure), exitWith)
 import System.IO (hPutStrLn, stderr)
+import Text.Printf (printf)
 import Text.Read (readMaybe)
 
 data Options = Options
   { json :: !Bool,
     top :: !Int,
     maxWord :: !Int,
+    benchRuns :: !Int,
+    benchWarmups :: !Int,
     path :: !FilePath
   }
 
@@ -55,10 +61,14 @@ main = do
         Left readFailure ->
           dieWith 1 ("cannot read " <> options.path <> ": " <> show readFailure)
         Right bytes -> do
-          let result = countBytes options.maxWord options.top bytes
-          putStr (if options.json then renderJson result else renderText result)
+          if options.benchRuns > 0
+            then renderBench options bytes >>= putStr
+            else do
+              let result = countBytes options.maxWord options.top bytes
+              putStr (if options.json then renderJson result else renderText result)
 
 countBytes :: Int -> Int -> ByteString.ByteString -> Result
+{-# NOINLINE countBytes #-}
 countBytes maxWord limit bytes =
   let normalizedMaxWord = normalizeMaxWord maxWord
       final = finish (ByteString.foldl' (step normalizedMaxWord) emptyScan bytes)
@@ -129,7 +139,7 @@ lowerA = 97
 lowerZ = 122
 
 parseArgs :: [String] -> Either String Options
-parseArgs = go (Options {json = False, top = 10, maxWord = maxWordLimit, path = ""})
+parseArgs = go (Options {json = False, top = 10, maxWord = maxWordLimit, benchRuns = 0, benchWarmups = 0, path = ""})
   where
     go options [] =
       if null options.path || options.top <= 0
@@ -148,6 +158,20 @@ parseArgs = go (Options {json = False, top = 10, maxWord = maxWordLimit, path = 
       | Just value <- stripPrefix "--max-word=" arg =
           parseNumber "--max-word" value >>= \maxWord ->
             go options {maxWord = maxWord} rest
+    go options ("--bench-runs" : value : rest) =
+      parseNumber "--bench-runs" value >>= \benchRuns ->
+        go options {benchRuns = benchRuns} rest
+    go options (arg : rest)
+      | Just value <- stripPrefix "--bench-runs=" arg =
+          parseNumber "--bench-runs" value >>= \benchRuns ->
+            go options {benchRuns = benchRuns} rest
+    go options ("--bench-warmups" : value : rest) =
+      parseNumber "--bench-warmups" value >>= \benchWarmups ->
+        go options {benchWarmups = benchWarmups} rest
+    go options (arg : rest)
+      | Just value <- stripPrefix "--bench-warmups=" arg =
+          parseNumber "--bench-warmups" value >>= \benchWarmups ->
+            go options {benchWarmups = benchWarmups} rest
     go options (arg : rest)
       | "-" `isPrefixOf` arg = Left usage
       | null options.path = go options {path = arg} rest
@@ -190,6 +214,43 @@ renderJsonEntry entry =
     <> "\",\"count\":"
     <> show entry.count
     <> "}"
+
+renderBench :: Options -> ByteString.ByteString -> IO String
+renderBench options bytes = do
+  forM_ [1 .. options.benchWarmups] $ \index -> do
+    input <- varyBytes index bytes
+    evaluate (checksum (countBytes options.maxWord options.top input))
+
+  started <- getMonotonicTimeNSec
+  checksumValue <-
+    foldM
+      ( \value index -> do
+          input <- varyBytes index bytes
+          next <-
+            evaluate
+              ( checksum
+                  (countBytes options.maxWord options.top input)
+              )
+          pure $! value `xor` next
+      )
+      0
+      [1 .. options.benchRuns]
+  finished <- getMonotonicTimeNSec
+
+  let meanMs = fromIntegral (finished - started) / 1_000_000 / fromIntegral options.benchRuns :: Double
+  pure (printf "{\"mean_ms\":%.6f,\"checksum\":%d}\n" meanMs checksumValue)
+
+checksum :: Result -> Int
+{-# NOINLINE checksum #-}
+checksum result =
+  foldl'
+    (\value entry -> value `xor` entry.count `xor` ByteString.length entry.word)
+    (result.total `xor` result.unique)
+    result.topEntries
+
+varyBytes :: Int -> ByteString.ByteString -> IO ByteString.ByteString
+{-# NOINLINE varyBytes #-}
+varyBytes index bytes = evaluate index >> pure bytes
 
 dieWith :: Int -> String -> IO ()
 dieWith code message = do

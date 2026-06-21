@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <charconv>
+#include <chrono>
 #include <cstddef>
 #include <cstdio>
 #include <cstdint>
@@ -37,6 +38,8 @@ struct Options {
     std::string path;
     std::size_t top = 10;
     std::size_t max_word = 1024;
+    std::size_t bench_runs = 0;
+    std::size_t bench_warmups = 0;
     bool json = false;
 };
 
@@ -92,16 +95,29 @@ struct Options {
 
         if (arg == "--json") {
             options.json = true;
-        } else if (arg == "--top" || arg == "--max-word") {
+        } else if (arg == "--top" || arg == "--max-word" ||
+                   arg == "--bench-runs" || arg == "--bench-warmups") {
             if (++index >= argc) {
                 throw std::invalid_argument{ usage };
             }
-            (arg == "--top" ? options.top : options.max_word) =
-                    parse_size(argv[index]);
+            const auto value = parse_size(argv[index]);
+            if (arg == "--top") {
+                options.top = value;
+            } else if (arg == "--max-word") {
+                options.max_word = value;
+            } else if (arg == "--bench-runs") {
+                options.bench_runs = value;
+            } else {
+                options.bench_warmups = value;
+            }
         } else if (arg.starts_with("--top=")) {
             options.top = parse_size(arg.substr(6));
         } else if (arg.starts_with("--max-word=")) {
             options.max_word = parse_size(arg.substr(11));
+        } else if (arg.starts_with("--bench-runs=")) {
+            options.bench_runs = parse_size(arg.substr(13));
+        } else if (arg.starts_with("--bench-warmups=")) {
+            options.bench_warmups = parse_size(arg.substr(16));
         } else if (options.path.empty() && !arg.starts_with("-")) {
             options.path = std::string{ arg };
         } else {
@@ -227,14 +243,49 @@ void render_text(const Result &result)
     std::println("total {}\nunique {}", result.total, result.unique);
 }
 
+[[nodiscard]] auto checksum(const Result &result) -> std::uint64_t
+{
+    auto value = result.total ^ static_cast<std::uint64_t>(result.unique);
+    for (const auto &entry : result.top) {
+        value ^= entry.count ^ static_cast<std::uint64_t>(entry.word.size());
+    }
+    return value;
+}
+
+void render_bench(const std::vector<unsigned char> &bytes,
+                  const Options &options)
+{
+    for (std::size_t index = 0; index < options.bench_warmups; ++index) {
+        (void)checksum(count_words(bytes, options.top, options.max_word));
+    }
+
+    auto checksum_value = std::uint64_t{};
+    const auto started = std::chrono::steady_clock::now();
+    for (std::size_t index = 0; index < options.bench_runs; ++index) {
+        checksum_value ^=
+                checksum(count_words(bytes, options.top, options.max_word));
+    }
+    const auto elapsed = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - started);
+
+    std::println("{{\"mean_ms\":{:.6f},\"checksum\":{}}}",
+                 elapsed.count() / static_cast<double>(options.bench_runs),
+                 checksum_value);
+}
+
 }  // namespace
 
 auto main(int argc, char **argv) -> int
 {
     try {
         const auto options = parse_args(argc, argv);
-        const auto result = count_words(
-                read_file(options.path), options.top, options.max_word);
+        const auto bytes = read_file(options.path);
+        if (options.bench_runs > 0) {
+            render_bench(bytes, options);
+            return 0;
+        }
+
+        const auto result = count_words(bytes, options.top, options.max_word);
         options.json ? render_json(result) : render_text(result);
         return 0;
     } catch (const std::exception &error) {

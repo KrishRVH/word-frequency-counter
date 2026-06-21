@@ -14,6 +14,10 @@ internal static class WordCounter {
 
     internal static Result CountFile(string path, int top, int maxWord) {
         byte[] bytes = File.ReadAllBytes(path);
+        return CountBytes(bytes, top, maxWord);
+    }
+
+    internal static Result CountBytes(ReadOnlySpan<byte> bytes, int top, int maxWord) {
         Accumulator accumulator = new(NormalizeMaxWord(maxWord), EstimatedUniqueWords(bytes));
         accumulator.AddBytes(bytes);
         return accumulator.Finish(top);

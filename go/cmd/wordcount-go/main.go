@@ -5,7 +5,9 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
+	"time"
 
 	"word-frequency-counter-go/internal/wordcount"
 )
@@ -27,12 +29,22 @@ func run() error {
 	jsonMode := flag.Bool("json", false, "print JSON")
 	topLimit := flag.Int("top", 10, "number of entries to print")
 	maxWord := flag.Int("max-word", 1024, "maximum stored word length")
+	benchRuns := flag.Int("bench-runs", 0, "in-process benchmark repetitions")
+	benchWarmups := flag.Int("bench-warmups", 0, "in-process benchmark warmups")
 	flag.Parse()
 
-	if flag.NArg() != 1 || *topLimit <= 0 || *maxWord < 0 {
+	if flag.NArg() != 1 || *topLimit <= 0 || *maxWord < 0 || *benchRuns < 0 || *benchWarmups < 0 {
 		return errors.New("usage: wordcount_go [--json] [--top N] [--max-word N] <file>")
 	}
 	path := flag.Arg(0)
+
+	if *benchRuns > 0 {
+		bytes, err := readFile(path)
+		if err != nil {
+			return fmt.Errorf("wordcount_go: cannot read %s: %w", path, err)
+		}
+		return printBench(bytes, *topLimit, *maxWord, *benchRuns, *benchWarmups)
+	}
 
 	file, err := os.Open(flag.Arg(0))
 	if err != nil {
@@ -66,4 +78,44 @@ func run() error {
 	}
 	fmt.Printf("total %d\nunique %d\n", report.Total, report.Unique)
 	return nil
+}
+
+func readFile(path string) ([]byte, error) {
+	// #nosec G304 -- benchmark mode intentionally reads the user-supplied fixture path.
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+
+	bytes, readErr := io.ReadAll(file)
+	closeErr := file.Close()
+	if readErr != nil {
+		return nil, readErr
+	}
+	return bytes, closeErr
+}
+
+func printBench(bytes []byte, top, maxWord, runs, warmups int) error {
+	for range warmups {
+		_ = checksum(wordcount.CountBytes(bytes, maxWord), top)
+	}
+
+	started := time.Now()
+	checksumValue := uint64(0)
+	for range runs {
+		checksumValue ^= checksum(wordcount.CountBytes(bytes, maxWord), top)
+	}
+	meanMs := float64(time.Since(started).Nanoseconds()) / 1_000_000.0 / float64(runs)
+
+	fmt.Printf("{\"mean_ms\":%.6f,\"checksum\":%d}\n", meanMs, checksumValue)
+	return nil
+}
+
+func checksum(result wordcount.Result, top int) uint64 {
+	// #nosec G115 -- Unique is len(counts), so it is non-negative and input-bounded.
+	value := result.Total ^ uint64(result.Unique)
+	for _, entry := range wordcount.Top(result, top) {
+		value ^= entry.Count ^ uint64(len(entry.Word))
+	}
+	return value
 }

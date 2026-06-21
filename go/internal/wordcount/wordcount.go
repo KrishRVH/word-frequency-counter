@@ -29,7 +29,10 @@ func Count(reader io.Reader, maxWord int) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	return CountBytes(bytes, maxWord), nil
+}
 
+func CountBytes(bytes []byte, maxWord int) Result {
 	maxWord = NormalizeMaxWord(maxWord)
 	counts := make(map[string]uint64, estimatedUniqueWords(bytes))
 	word := make([]byte, 0, min(maxWord, defaultMaxWord))
@@ -55,7 +58,7 @@ func Count(reader io.Reader, maxWord int) (Result, error) {
 		total++
 	}
 
-	return Result{Total: total, Unique: len(counts), Counts: counts}, nil
+	return Result{Total: total, Unique: len(counts), Counts: counts}
 }
 
 func estimatedUniqueWords(bytes []byte) int {

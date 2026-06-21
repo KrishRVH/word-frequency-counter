@@ -25,6 +25,8 @@ type BenchOptions = {
   maxWord: number;
   runs: number;
   warmups: number;
+  warmTaskRuns: number;
+  warmTaskWarmups: number;
   buildOnly: boolean;
   validateOnly: boolean;
 };
@@ -40,12 +42,14 @@ type BenchmarkState = {
   implementation: Implementation;
   command: Command;
   startupCommand: Command;
+  warmTaskCommand: Command;
   totalSamples: number[];
   startupSamples: number[];
   adjustedSamples: number[];
 };
 
 type BenchmarkResult = {
+  warmTaskMeanMs: number;
   totalMeanMs: number;
   startupMeanMs: number;
   adjustedMeanMs: number;
@@ -54,7 +58,6 @@ type BenchmarkResult = {
 
 type SummaryRow = {
   name: string;
-  status: string;
   timing?: BenchmarkResult;
 };
 
@@ -375,7 +378,7 @@ if (!options.buildOnly) {
       );
       assertSame(`${implementation.name} (${testCase.name})`, oracle, result);
     }
-    rows.push({ name: implementation.name, status: "ok" });
+    rows.push({ name: implementation.name });
   }
 
   if (!options.validateOnly) {
@@ -386,6 +389,8 @@ if (!options.buildOnly) {
       options.maxWord,
       options.runs,
       options.warmups,
+      options.warmTaskRuns,
+      options.warmTaskWarmups,
     );
     for (const row of rows) {
       const timing = timings.get(row.name);
@@ -405,6 +410,14 @@ function parseArgs(args: string[]): BenchOptions {
     maxWord: parseDecimal(process.env.WFC_MAX_WORD ?? "1024", "WFC_MAX_WORD"),
     runs: 5,
     warmups: parseDecimal(process.env.WFC_WARMUPS ?? "3", "WFC_WARMUPS"),
+    warmTaskRuns: parseDecimal(
+      process.env.WFC_WARM_TASK_RUNS ?? "50",
+      "WFC_WARM_TASK_RUNS",
+    ),
+    warmTaskWarmups: parseDecimal(
+      process.env.WFC_WARM_TASK_WARMUPS ?? "10",
+      "WFC_WARM_TASK_WARMUPS",
+    ),
     buildOnly: false,
     validateOnly: false,
   };
@@ -428,11 +441,23 @@ function parseArgs(args: string[]): BenchOptions {
         arg.slice("--warmups=".length),
         "--warmups",
       );
+    else if (arg.startsWith("--warm-task-runs="))
+      parsed.warmTaskRuns = parseDecimal(
+        arg.slice("--warm-task-runs=".length),
+        "--warm-task-runs",
+      );
+    else if (arg.startsWith("--warm-task-warmups="))
+      parsed.warmTaskWarmups = parseDecimal(
+        arg.slice("--warm-task-warmups=".length),
+        "--warm-task-warmups",
+      );
     else throw new Error(`unknown option: ${arg}`);
   }
 
   if (parsed.top <= 0) throw new Error("--top must be greater than 0");
   if (parsed.runs <= 0) throw new Error("--runs must be greater than 0");
+  if (parsed.warmTaskRuns <= 0)
+    throw new Error("--warm-task-runs must be greater than 0");
 
   parsed.fixture = resolve(root, parsed.fixture);
   return parsed;
@@ -626,15 +651,30 @@ async function benchmarkAll(
   maxWord: number,
   runs: number,
   warmups: number,
+  warmTaskRuns: number,
+  warmTaskWarmups: number,
 ): Promise<Map<string, BenchmarkResult>> {
   const states: BenchmarkState[] = implementations.map((implementation) => ({
     implementation,
     command: implementation.run(fixture, top, maxWord),
     startupCommand: implementation.run(startupFixture, top, maxWord),
+    warmTaskCommand: warmTaskCommand(
+      implementation.run(fixture, top, maxWord),
+      warmTaskRuns,
+      warmTaskWarmups,
+    ),
     totalSamples: [],
     startupSamples: [],
     adjustedSamples: [],
   }));
+
+  const warmTaskMeans = new Map<string, number>();
+  for (const state of states) {
+    warmTaskMeans.set(
+      state.implementation.name,
+      await runWarmTask(state.warmTaskCommand),
+    );
+  }
 
   for (let index = 0; index < warmups; index += 1) {
     for (const state of rotated(states, index)) {
@@ -657,6 +697,7 @@ async function benchmarkAll(
     states.map((state) => [
       state.implementation.name,
       {
+        warmTaskMeanMs: warmTaskMeans.get(state.implementation.name) ?? 0,
         totalMeanMs: mean(state.totalSamples),
         startupMeanMs: mean(state.startupSamples),
         adjustedMeanMs: mean(state.adjustedSamples),
@@ -664,6 +705,31 @@ async function benchmarkAll(
       },
     ]),
   );
+}
+
+function warmTaskCommand(command: Command, runs: number, warmups: number) {
+  const fixture = command.args.at(-1);
+  if (fixture === undefined) {
+    throw new Error(`${command.cmd} has no fixture argument`);
+  }
+
+  return {
+    ...command,
+    args: [
+      ...command.args.slice(0, -1),
+      "--bench-runs",
+      String(runs),
+      "--bench-warmups",
+      String(warmups),
+      fixture,
+    ],
+  };
+}
+
+async function runWarmTask(command: Command): Promise<number> {
+  const output = await run(command);
+  const result = JSON.parse(output) as { mean_ms: number };
+  return result.mean_ms;
 }
 
 function rotated<T>(items: T[], offset: number) {
@@ -701,28 +767,28 @@ function assertSame(name: string, expected: JsonResult, actual: JsonResult) {
 function printSummary(rows: SummaryRow[]) {
   const hasTimings = rows.some((row) => row.timing !== undefined);
   if (!hasTimings) {
-    console.log("| implementation | status |");
-    console.log("|---|---:|");
+    console.log("| implementation |");
+    console.log("|---|");
     for (const row of rows) {
-      console.log(`| ${row.name} | ${row.status} |`);
+      console.log(`| ${row.name} |`);
     }
     return;
   }
 
   const displayRows = [...rows].sort(
     (left, right) =>
-      (left.timing?.adjustedMeanMs ?? Number.POSITIVE_INFINITY) -
-      (right.timing?.adjustedMeanMs ?? Number.POSITIVE_INFINITY),
+      (left.timing?.warmTaskMeanMs ?? Number.POSITIVE_INFINITY) -
+      (right.timing?.warmTaskMeanMs ?? Number.POSITIVE_INFINITY),
   );
 
   console.log(
-    "| implementation | status | raw mean ms | startup mean ms | adjusted mean ms | adjusted p95 ms |",
+    "| implementation | warm task mean ms | raw CLI mean ms | startup mean ms | adjusted CLI mean ms | adjusted CLI p95 ms |",
   );
   console.log("|---|---:|---:|---:|---:|---:|");
   for (const row of displayRows) {
     const timing = row.timing;
     console.log(
-      `| ${row.name} | ${row.status} | ${timing === undefined ? "" : timing.totalMeanMs.toFixed(3)} | ${timing === undefined ? "" : timing.startupMeanMs.toFixed(3)} | ${timing === undefined ? "" : timing.adjustedMeanMs.toFixed(3)} | ${timing === undefined ? "" : timing.adjustedP95Ms.toFixed(3)} |`,
+      `| ${row.name} | ${timing === undefined ? "" : timing.warmTaskMeanMs.toFixed(3)} | ${timing === undefined ? "" : timing.totalMeanMs.toFixed(3)} | ${timing === undefined ? "" : timing.startupMeanMs.toFixed(3)} | ${timing === undefined ? "" : timing.adjustedMeanMs.toFixed(3)} | ${timing === undefined ? "" : timing.adjustedP95Ms.toFixed(3)} |`,
     );
   }
 }

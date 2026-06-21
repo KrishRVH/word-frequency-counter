@@ -10,6 +10,8 @@ final readonly class CliOptions
         public string $path,
         public int $top,
         public int $maxWord,
+        public int $benchRuns,
+        public int $benchWarmups,
         public bool $json,
     ) {
     }
