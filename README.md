@@ -163,6 +163,7 @@ mise run build
 mise run validate
 mise run bench -- --runs=10
 mise run check:local
+mise run check
 mise run clean
 ```
 

@@ -26,3 +26,6 @@ developer interface behind `mise`.
 - `mise run validate`
 - `mise run bench`
 - `mise run check:local`
+- `mise run check`
+- `mise run install`
+- `mise run clean`
