@@ -201,6 +201,12 @@ The default `mise run bench` corpus is generated under
 also written to `build/fixtures/benchmark.txt`. Use `--fixture=fixtures/spec.txt`
 when you want the tiny contract fixture instead of the corpus.
 
+The mise environment sets `WFC_CORPUS=default`. `WFC_TOP`, `WFC_MAX_WORD`, and
+`WFC_ORACLE` remain environment-level defaults for local runs. `WFC_FIXTURE` is
+still accepted as a legacy custom-fixture default, but only when `WFC_CORPUS` is
+unset; explicit `--fixture=...` and `--corpus=...` flags are clearer for new
+runs.
+
 There are intentionally no per-language test suites. Correctness is the oracle
 comparison: `mise run validate` checks every benchmark fixture, or the supplied
 custom fixture, plus a small matrix of generated edge-case fixtures against
