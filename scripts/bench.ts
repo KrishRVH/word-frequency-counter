@@ -20,7 +20,8 @@ type Implementation = {
 };
 
 type BenchOptions = {
-  fixture: string;
+  corpus: string;
+  fixture?: string;
   top: number;
   maxWord: number;
   runs: number;
@@ -37,6 +38,24 @@ type ValidationCase = {
   fixture: string;
   top: number;
   maxWord: number;
+};
+
+type CorpusProfile = "mixed" | "unique" | "repeated" | "long";
+
+type CorpusSpec = {
+  name: string;
+  targetBytes: number;
+  profile: CorpusProfile;
+  description: string;
+  primary?: boolean;
+};
+
+type BenchmarkFixture = {
+  name: string;
+  fixture: string;
+  bytes: number;
+  description: string;
+  primary: boolean;
 };
 
 type BenchmarkState = {
@@ -62,7 +81,7 @@ type WarmTaskResult = { mean_ms: number; checksum: number | string };
 
 type SummaryRow = {
   name: string;
-  timing?: BenchmarkResult;
+  timings: Map<string, BenchmarkResult>;
 };
 
 const root = resolve(import.meta.dir, "..");
@@ -73,7 +92,7 @@ const csharpBin = join(
     (process.platform === "win32" ? ".exe" : ""),
 );
 const validationFixtures = join(root, "build", "fixtures");
-const benchmarkFixture = join(validationFixtures, "benchmark.txt");
+const legacyBenchmarkFixture = join(validationFixtures, "benchmark.txt");
 const startupFixture = join(validationFixtures, "startup-empty.txt");
 const haskellBuild = join(root, "build", "haskell");
 const tokenfreqRoot = join(homedir(), "dev/personal/tokenfreq-c99");
@@ -89,6 +108,80 @@ const benchmarkWords = [
   "theta",
 ];
 const benchmarkSeparators = [" ", "\n", ",", "--", "123", "\t", "!!"];
+const corpusDefinitions = new Map<string, CorpusSpec[]>([
+  [
+    "default",
+    [
+      {
+        name: "tiny-mix",
+        targetBytes: 4 * 1024,
+        profile: "mixed",
+        description: "startup-sensitive smoke fixture",
+      },
+      {
+        name: "small-mix",
+        targetBytes: 64 * 1024,
+        profile: "mixed",
+        description: "fits comfortably in cache",
+      },
+      {
+        name: "medium-mix",
+        targetBytes: 512 * 1024,
+        profile: "mixed",
+        description: "primary mixed repeated/unique workload",
+        primary: true,
+      },
+      {
+        name: "unique-sort",
+        targetBytes: 512 * 1024,
+        profile: "unique",
+        description: "mostly unique words, stressing allocation and sort",
+      },
+    ],
+  ],
+  [
+    "stress",
+    [
+      {
+        name: "tiny-mix",
+        targetBytes: 4 * 1024,
+        profile: "mixed",
+        description: "startup-sensitive smoke fixture",
+      },
+      {
+        name: "small-mix",
+        targetBytes: 64 * 1024,
+        profile: "mixed",
+        description: "fits comfortably in cache",
+      },
+      {
+        name: "medium-mix",
+        targetBytes: 512 * 1024,
+        profile: "mixed",
+        description: "primary mixed repeated/unique workload",
+        primary: true,
+      },
+      {
+        name: "unique-sort",
+        targetBytes: 512 * 1024,
+        profile: "unique",
+        description: "mostly unique words, stressing allocation and sort",
+      },
+      {
+        name: "repeated-scan",
+        targetBytes: 1 * 1024 * 1024,
+        profile: "repeated",
+        description: "large low-cardinality scanner and hot-map case",
+      },
+      {
+        name: "long-clamp",
+        targetBytes: 256 * 1024,
+        profile: "long",
+        description: "long words that exercise max-word clamping",
+      },
+    ],
+  ],
+]);
 
 const implementations: Implementation[] = [
   {
@@ -350,26 +443,29 @@ const options = parseArgs(process.argv.slice(2));
 mkdirSync(buildBin, { recursive: true });
 mkdirSync(validationFixtures, { recursive: true });
 mkdirSync(haskellBuild, { recursive: true });
-writeFileSync(benchmarkFixture, createBenchmarkFixture());
+const benchmarkFixtures = createBenchmarkFixtures(options);
 writeFileSync(startupFixture, "");
 
 await ensureOracle();
 await buildAll();
 
 if (!options.buildOnly) {
-  const validationCases = createValidationCases(options);
+  const validationCases = createValidationCases(options, benchmarkFixtures);
   const expectedCases: { testCase: ValidationCase; oracle: JsonResult }[] = [];
   const rows: SummaryRow[] = [];
+  const expectedByName = new Map<string, JsonResult>();
 
   for (const testCase of validationCases) {
-    expectedCases.push({
+    const expectedCase = {
       testCase,
       oracle: await oracleResult(
         testCase.fixture,
         testCase.top,
         testCase.maxWord,
       ),
-    });
+    };
+    expectedCases.push(expectedCase);
+    expectedByName.set(testCase.name, expectedCase.oracle);
   }
 
   for (const implementation of implementations) {
@@ -382,36 +478,50 @@ if (!options.buildOnly) {
       );
       assertSame(`${implementation.name} (${testCase.name})`, oracle, result);
     }
-    rows.push({ name: implementation.name });
+    rows.push({ name: implementation.name, timings: new Map() });
   }
 
   if (!options.validateOnly) {
-    const timings = await benchmarkAll(
-      implementations,
-      options.fixture,
-      options.top,
-      options.maxWord,
-      options.runs,
-      options.warmups,
-      options.warmTaskSamples,
-      options.warmTaskRuns,
-      options.warmTaskWarmups,
-      checksumResult(expectedCases[0].oracle),
-    );
-    for (const row of rows) {
-      const timing = timings.get(row.name);
-      if (timing !== undefined) {
-        row.timing = timing;
+    for (const benchmarkFixture of benchmarkFixtures) {
+      const expected = expectedByName.get(
+        validationNameForBenchmarkFixture(benchmarkFixture),
+      );
+      if (expected === undefined) {
+        throw new Error(`missing oracle result for ${benchmarkFixture.name}`);
+      }
+      const timings = await benchmarkAll(
+        implementations,
+        benchmarkFixture.fixture,
+        options.top,
+        options.maxWord,
+        options.runs,
+        options.warmups,
+        options.warmTaskSamples,
+        options.warmTaskRuns,
+        options.warmTaskWarmups,
+        checksumResult(expected),
+      );
+      for (const row of rows) {
+        const timing = timings.get(row.name);
+        if (timing !== undefined) {
+          row.timings.set(benchmarkFixture.name, timing);
+        }
       }
     }
   }
 
-  printSummary(rows);
+  printSummary(rows, benchmarkFixtures);
 }
 
 function parseArgs(args: string[]): BenchOptions {
+  const envCorpus = process.env.WFC_CORPUS;
+  const envFixture =
+    envCorpus === undefined && process.env.WFC_FIXTURE !== ""
+      ? process.env.WFC_FIXTURE
+      : undefined;
   const parsed: BenchOptions = {
-    fixture: process.env.WFC_FIXTURE ?? benchmarkFixture,
+    corpus: envCorpus ?? "default",
+    fixture: envFixture,
     top: parseDecimal(process.env.WFC_TOP ?? "10", "WFC_TOP"),
     maxWord: parseDecimal(process.env.WFC_MAX_WORD ?? "1024", "WFC_MAX_WORD"),
     runs: 5,
@@ -437,7 +547,10 @@ function parseArgs(args: string[]): BenchOptions {
     else if (arg === "--validate") parsed.validateOnly = true;
     else if (arg.startsWith("--fixture="))
       parsed.fixture = arg.slice("--fixture=".length);
-    else if (arg.startsWith("--top="))
+    else if (arg.startsWith("--corpus=")) {
+      parsed.corpus = arg.slice("--corpus=".length);
+      parsed.fixture = undefined;
+    } else if (arg.startsWith("--top="))
       parsed.top = parseDecimal(arg.slice("--top=".length), "--top");
     else if (arg.startsWith("--max-word="))
       parsed.maxWord = parseDecimal(
@@ -476,18 +589,16 @@ function parseArgs(args: string[]): BenchOptions {
   if (parsed.warmTaskRuns <= 0)
     throw new Error("--warm-task-runs must be greater than 0");
 
-  parsed.fixture = resolve(root, parsed.fixture);
+  if (parsed.fixture !== undefined) {
+    parsed.fixture = resolve(root, parsed.fixture);
+  }
   return parsed;
 }
 
-function createValidationCases(options: BenchOptions): ValidationCase[] {
-  const requested = {
-    name: "requested",
-    fixture: options.fixture,
-    top: options.top,
-    maxWord: options.maxWord,
-  };
-
+function createValidationCases(
+  options: BenchOptions,
+  benchmarkFixtures: BenchmarkFixture[],
+): ValidationCase[] {
   const generated = [
     {
       name: "empty",
@@ -536,7 +647,12 @@ function createValidationCases(options: BenchOptions): ValidationCase[] {
   ];
 
   return [
-    requested,
+    ...benchmarkFixtures.map((benchmarkFixture) => ({
+      name: validationNameForBenchmarkFixture(benchmarkFixture),
+      fixture: benchmarkFixture.fixture,
+      top: options.top,
+      maxWord: options.maxWord,
+    })),
     ...generated.map((testCase) => ({
       name: testCase.name,
       fixture: writeValidationFixture(testCase.name, testCase.content),
@@ -552,23 +668,83 @@ function writeValidationFixture(name: string, content: string | Uint8Array) {
   return fixture;
 }
 
-function createBenchmarkFixture() {
-  const parts: string[] = [];
-
-  for (let index = 0; index < 32_000; index += 1) {
-    parts.push(
-      benchmarkWords[index % benchmarkWords.length],
-      benchmarkSeparators[index % benchmarkSeparators.length],
-    );
-  }
-  for (let index = 0; index < 8_000; index += 1) {
-    parts.push(
-      syntheticWord(index),
-      benchmarkSeparators[(index + 3) % benchmarkSeparators.length],
-    );
+function createBenchmarkFixtures(options: BenchOptions): BenchmarkFixture[] {
+  if (options.fixture !== undefined) {
+    return [
+      {
+        name: "custom",
+        fixture: options.fixture,
+        bytes: statSync(options.fixture).size,
+        description: "custom fixture",
+        primary: true,
+      },
+    ];
   }
 
-  return `${parts.join("")}\n`;
+  const specs = corpusDefinitions.get(options.corpus);
+  if (specs === undefined) {
+    throw new Error(
+      `unknown corpus: ${options.corpus}; expected ${[
+        ...corpusDefinitions.keys(),
+      ].join(", ")}`,
+    );
+  }
+
+  const hasPrimary = specs.some((spec) => spec.primary === true);
+  return specs.map((spec, index) => {
+    const content = createCorpusFixture(spec);
+    const fixture = writeBenchmarkFixture(spec.name, content);
+    if (spec.primary === true || (!hasPrimary && index === 0)) {
+      writeFileSync(legacyBenchmarkFixture, content);
+    }
+    return {
+      name: spec.name,
+      fixture,
+      bytes: content.length,
+      description: spec.description,
+      primary: spec.primary === true || (!hasPrimary && index === 0),
+    };
+  });
+}
+
+function createCorpusFixture(spec: CorpusSpec) {
+  let content = "";
+  let index = 0;
+
+  while (content.length < spec.targetBytes) {
+    content += corpusWord(spec.profile, index);
+    content += benchmarkSeparators[index % benchmarkSeparators.length];
+    index += 1;
+  }
+
+  return content.endsWith("\n") ? content : `${content}\n`;
+}
+
+function corpusWord(profile: CorpusProfile, index: number) {
+  if (profile === "unique") {
+    return syntheticWord(index) + syntheticWord(index + 17);
+  }
+  if (profile === "repeated") {
+    return benchmarkWords[index % benchmarkWords.length];
+  }
+  if (profile === "long") {
+    const base = benchmarkWords[index % benchmarkWords.length].toLowerCase();
+    return `${base}${syntheticWord(index).repeat(16)}`;
+  }
+  if (index % 5 === 0) {
+    return syntheticWord(index);
+  }
+  return benchmarkWords[index % benchmarkWords.length];
+}
+
+function writeBenchmarkFixture(name: string, content: string) {
+  const fixture = join(validationFixtures, `bench-${name}.txt`);
+  writeFileSync(fixture, content);
+  return fixture;
+}
+
+function validationNameForBenchmarkFixture(benchmarkFixture: BenchmarkFixture) {
+  return `bench:${benchmarkFixture.name}`;
 }
 
 function syntheticWord(value: number) {
@@ -831,8 +1007,11 @@ function assertSame(name: string, expected: JsonResult, actual: JsonResult) {
   }
 }
 
-function printSummary(rows: SummaryRow[]) {
-  const hasTimings = rows.some((row) => row.timing !== undefined);
+function printSummary(
+  rows: SummaryRow[],
+  benchmarkFixtures: BenchmarkFixture[],
+) {
+  const hasTimings = rows.some((row) => row.timings.size > 0);
   if (!hasTimings) {
     console.log("| implementation |");
     console.log("|---|");
@@ -842,22 +1021,110 @@ function printSummary(rows: SummaryRow[]) {
     return;
   }
 
+  if (benchmarkFixtures.length > 1) {
+    printCorpus(benchmarkFixtures);
+    printCorpusSummary(rows, benchmarkFixtures);
+    return;
+  }
+
+  printSingleFixtureSummary(rows, benchmarkFixtures[0]);
+}
+
+function printCorpus(benchmarkFixtures: BenchmarkFixture[]) {
+  console.log("| fixture | bytes | role | notes |");
+  console.log("|---|---:|---|---|");
+  for (const benchmarkFixture of benchmarkFixtures) {
+    console.log(
+      `| ${benchmarkFixture.name} | ${benchmarkFixture.bytes} | ${
+        benchmarkFixture.primary ? "primary" : ""
+      } | ${benchmarkFixture.description} |`,
+    );
+  }
+  console.log("");
+}
+
+function printCorpusSummary(
+  rows: SummaryRow[],
+  benchmarkFixtures: BenchmarkFixture[],
+) {
+  const primaryFixture =
+    benchmarkFixtures.find((benchmarkFixture) => benchmarkFixture.primary) ??
+    benchmarkFixtures[0];
   const displayRows = [...rows].sort(
     (left, right) =>
-      (left.timing?.warmTaskMeanMs ?? Number.POSITIVE_INFINITY) -
-      (right.timing?.warmTaskMeanMs ?? Number.POSITIVE_INFINITY),
+      (left.timings.get(primaryFixture.name)?.warmTaskMeanMs ??
+        Number.POSITIVE_INFINITY) -
+      (right.timings.get(primaryFixture.name)?.warmTaskMeanMs ??
+        Number.POSITIVE_INFINITY),
+  );
+  const timingColumns = benchmarkFixtures
+    .map((benchmarkFixture) => ` ${benchmarkFixture.name} ms `)
+    .join("|");
+  const alignmentColumns = benchmarkFixtures.map(() => "---:").join("|");
+
+  console.log(
+    `| implementation |${timingColumns}| ${primaryFixture.name} MB/s | ${primaryFixture.name} adjusted CLI ms |`,
+  );
+  console.log(`|---|${alignmentColumns}|---:|---:|`);
+  for (const row of displayRows) {
+    const timingCells = benchmarkFixtures
+      .map((benchmarkFixture) =>
+        formatMaybe(row.timings.get(benchmarkFixture.name)?.warmTaskMeanMs),
+      )
+      .join(" | ");
+    const primaryTiming = row.timings.get(primaryFixture.name);
+    console.log(
+      `| ${row.name} | ${timingCells} | ${
+        primaryTiming === undefined
+          ? ""
+          : throughputMiBPerSecond(primaryFixture.bytes, primaryTiming)
+      } | ${formatMaybe(primaryTiming?.adjustedMeanMs)} |`,
+    );
+  }
+}
+
+function printSingleFixtureSummary(
+  rows: SummaryRow[],
+  benchmarkFixture: BenchmarkFixture,
+) {
+  const displayRows = [...rows].sort(
+    (left, right) =>
+      (left.timings.get(benchmarkFixture.name)?.warmTaskMeanMs ??
+        Number.POSITIVE_INFINITY) -
+      (right.timings.get(benchmarkFixture.name)?.warmTaskMeanMs ??
+        Number.POSITIVE_INFINITY),
   );
 
   console.log(
-    "| implementation | warm task mean ms | raw CLI mean ms | startup mean ms | adjusted CLI mean ms | adjusted CLI p95 ms |",
+    "| implementation | warm task mean ms | warm task MB/s | raw CLI mean ms | startup mean ms | adjusted CLI mean ms | adjusted CLI p95 ms |",
   );
-  console.log("|---|---:|---:|---:|---:|---:|");
+  console.log("|---|---:|---:|---:|---:|---:|---:|");
   for (const row of displayRows) {
-    const timing = row.timing;
+    const timing = row.timings.get(benchmarkFixture.name);
     console.log(
-      `| ${row.name} | ${timing === undefined ? "" : timing.warmTaskMeanMs.toFixed(3)} | ${timing === undefined ? "" : timing.totalMeanMs.toFixed(3)} | ${timing === undefined ? "" : timing.startupMeanMs.toFixed(3)} | ${timing === undefined ? "" : timing.adjustedMeanMs.toFixed(3)} | ${timing === undefined ? "" : timing.adjustedP95Ms.toFixed(3)} |`,
+      `| ${row.name} | ${formatMaybe(timing?.warmTaskMeanMs)} | ${
+        timing === undefined
+          ? ""
+          : throughputMiBPerSecond(benchmarkFixture.bytes, timing)
+      } | ${formatMaybe(timing?.totalMeanMs)} | ${formatMaybe(
+        timing?.startupMeanMs,
+      )} | ${formatMaybe(timing?.adjustedMeanMs)} | ${formatMaybe(
+        timing?.adjustedP95Ms,
+      )} |`,
     );
   }
+}
+
+function formatMaybe(value: number | undefined) {
+  return value === undefined ? "" : value.toFixed(3);
+}
+
+function throughputMiBPerSecond(bytes: number, timing: BenchmarkResult) {
+  if (timing.warmTaskMeanMs === 0) {
+    return "inf";
+  }
+  const mib = bytes / 1024 / 1024;
+  return (mib / (timing.warmTaskMeanMs / 1000)).toFixed(1);
 }
 
 async function run(command: Command): Promise<string> {

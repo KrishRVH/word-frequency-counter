@@ -87,13 +87,13 @@ shortcuts.
 
 The harness times built release artifacts when a language normally produces one,
 uses the same `--top` and `--max-word` for every timing, and sorts the summary by
-`warm task mean ms`: an already-running, in-process proxy where the fixture is
-read once, the counting function is warmed, and repeated count batches are timed
-inside the language runtime. The harness validates each implementation's hidden
-warm-task checksum against the normal oracle-checked result before it reports
-timings. Raw CLI, startup, and adjusted CLI timings stay visible because
-runtime-heavy languages can spend most of their wall time before the scanner does
-meaningful work.
+the primary corpus fixture's `warm task mean ms`: an already-running, in-process
+proxy where the fixture is read once, the counting function is warmed, and
+repeated count batches are timed inside the language runtime. The harness
+validates each implementation's hidden warm-task checksum against the normal
+oracle-checked result before it reports timings. Raw CLI, startup, and adjusted
+CLI timings stay visible because runtime-heavy languages can spend most of their
+wall time before the scanner does meaningful work.
 
 The per-language CLIs also accept internal `--bench-runs N` and
 `--bench-warmups N` flags. They are intentionally omitted from the public
@@ -102,52 +102,71 @@ case without adding public wrapper scripts or per-language test surfaces.
 
 ## Implementations
 
-| Language   | Shape                                  | Commentary                                                                                                                                                                                                |
-| ---------- | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| C23        | `c/` library plus CLI                  | The native exception for C's missing standard map: byte scanner, small open-addressed table, explicit allocation and cleanup.                                                                             |
-| C++26      | single CLI                             | Modern standard-library version: `std::from_chars`, `std::unordered_map`, vectors, and ranges sorting without turning the solution into a framework.                                                      |
-| Rust 2024  | library plus CLI                       | Small ownership-conscious core over `&[u8]`, `HashMap`, and explicit render functions. It is one of the cleanest balances of safety, speed, and readability here.                                         |
-| Go         | `internal/wordcount` plus command      | Reads bytes with `io.ReadAll`, scans directly, and keeps the package boundary natural Go. The code stays deliberately boring.                                                                             |
-| JavaScript | ESM CLI with `checkJs`                 | Uses `Uint8Array`, `Map`, and explicit ASCII helpers. The implementation is readable, with string accumulation still visible once startup is removed from the benchmark.                                  |
-| PHP        | Composer package plus thin bin wrapper | The most standards-heavy dynamic implementation: strict types, value objects, PHPCS, PHPMD, PHPStan, Psalm, Deptrac, and Rector dry-run. The code is more formal because the quality gate is more formal. |
-| C#         | .NET console app                       | Reads bytes with `File.ReadAllBytes`, carries scanner state in an accumulator, and benchmarks the built Release app directly.                                                                             |
-| Lua        | module plus executable script          | Compact table-based scanner with a small CLI wrapper. It is a good example of Lua being direct without pretending to be a static language.                                                                |
-| Kotlin     | Gradle JVM app                         | Uses a byte array, `StringBuilder`, unsigned counts, and locked Gradle tooling. The warm-task column compares scanner work, while the CLI columns keep JVM startup cost visible.                          |
-| Elixir     | Mix escript                            | Expresses the scanner as a reducer over bytes with immutable maps. It is elegant BEAM code for the problem, not a claim that BEAM is ideal for tiny byte-counting CLIs.                                   |
-| Zig        | single native CLI                      | Explicit allocator ownership, scoped arena lifetime, `StringHashMap`, and low ceremony. It makes the byte-level mechanics visible without C's manual cleanup surface.                                     |
-| Haskell    | GHC-built CLI                          | Strict `ByteString` fold into `Data.Map.Strict`, with pure parse/render/counting pieces. `Map` is a deliberate standard-library caveat rather than an extra dependency for a hash table.                  |
+| Language   | Shape                                  | Commentary                                                                                                                                                                                                                                     |
+| ---------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| C23        | `c/` library plus CLI                  | The native exception for C's missing standard map: byte scanner, small open-addressed table, explicit allocation and cleanup.                                                                                                                  |
+| C++26      | single CLI                             | Modern standard-library version: `std::from_chars`, `std::unordered_map`, vectors, and ranges sorting without turning the solution into a framework.                                                                                           |
+| Rust 2024  | library plus CLI                       | Ownership-conscious core over `&[u8]`, `HashMap`, borrowed `Cow<[u8]>` keys for already-lowercase words, byte-backed result entries, and explicit render functions. It is one of the cleanest balances of safety, speed, and readability here. |
+| Go         | `internal/wordcount` plus command      | Reads bytes with `io.ReadAll`, scans directly, and keeps the package boundary natural Go. The code stays deliberately boring.                                                                                                                  |
+| JavaScript | ESM CLI with `checkJs`                 | Uses `Uint8Array`, `Map`, and explicit ASCII helpers. The implementation is readable, with string accumulation still visible once startup is removed from the benchmark.                                                                       |
+| PHP        | Composer package plus thin bin wrapper | The most standards-heavy dynamic implementation: strict types, value objects, PHPCS, PHPMD, PHPStan, Psalm, Deptrac, and Rector dry-run. The code is more formal because the quality gate is more formal.                                      |
+| C#         | .NET console app                       | Reads bytes with `File.ReadAllBytes`, carries scanner state in an accumulator, and benchmarks the built Release app directly.                                                                                                                  |
+| Lua        | module plus executable script          | Compact table-based scanner with a small CLI wrapper. It is a good example of Lua being direct without pretending to be a static language.                                                                                                     |
+| Kotlin     | Gradle JVM app                         | Uses a byte array, `StringBuilder`, unsigned counts, and locked Gradle tooling. The warm-task column compares scanner work, while the CLI columns keep JVM startup cost visible.                                                               |
+| Elixir     | Mix escript                            | Expresses the scanner as a reducer over bytes with immutable maps. It is elegant BEAM code for the problem, not a claim that BEAM is ideal for tiny byte-counting CLIs.                                                                        |
+| Zig        | single native CLI                      | Explicit allocator ownership, scoped arena lifetime, `StringHashMap`, and low ceremony. It makes the byte-level mechanics visible without C's manual cleanup surface.                                                                          |
+| Haskell    | GHC-built CLI                          | Strict `ByteString` fold into `Data.Map.Strict`, with pure parse/render/counting pieces. `Map` is a deliberate standard-library caveat rather than an extra dependency for a hash table.                                                       |
+
+## Benchmark Corpus
+
+The default benchmark is a deterministic generated corpus, not a single
+representative text file. That keeps the table honest about size and
+cardinality effects without committing generated fixtures to git.
+
+| Fixture       |    Size | Role    | What it exposes                                      |
+| ------------- | ------: | ------- | ---------------------------------------------------- |
+| `tiny-mix`    |   4 KiB | smoke   | Startup noise and fixed overheads                    |
+| `small-mix`   |  64 KiB | cache   | Scanner and map behavior on a still-small input      |
+| `medium-mix`  | 512 KiB | primary | Mixed repeated and unique words; headline sort order |
+| `unique-sort` | 512 KiB | stress  | Mostly unique words, allocation pressure, full sort  |
+
+The `stress` corpus adds `repeated-scan` and `long-clamp` for low-cardinality
+throughput and max-word truncation pressure. Use `--fixture=...` when you want a
+one-off file instead of the generated corpus.
 
 ## Benchmark Snapshot
 
-Last local run:
+Short local corpus sanity run:
 
 ```sh
-mise run bench -- --runs=10 --warmups=5
+mise run bench -- --runs=2 --warmups=1 --warm-task-samples=1 --warm-task-runs=10 --warm-task-warmups=3
 ```
 
-| implementation | warm task mean ms | raw CLI mean ms | startup mean ms | adjusted CLI mean ms | adjusted CLI p95 ms |
-| -------------- | ----------------: | --------------: | --------------: | -------------------: | ------------------: |
-| rust           |             1.353 |           2.413 |           0.742 |                1.671 |               2.198 |
-| zig            |             1.411 |           2.520 |           0.703 |                1.817 |               2.194 |
-| cpp            |             1.526 |           3.106 |           1.065 |                2.041 |               2.549 |
-| c              |             1.569 |           2.504 |           0.661 |                1.843 |               2.026 |
-| go             |             2.465 |           4.101 |           1.277 |                2.824 |               3.066 |
-| kotlin         |             2.553 |          99.119 |          67.134 |               31.985 |              36.533 |
-| csharp         |             3.601 |          53.160 |          44.635 |                9.339 |              12.092 |
-| haskell        |             4.077 |           7.191 |           1.342 |                5.848 |               6.193 |
-| javascript     |             5.622 |          32.875 |          18.333 |               14.542 |              16.294 |
-| elixir         |            11.770 |         255.330 |         239.702 |               15.627 |              24.810 |
-| php            |            22.031 |          34.167 |          10.545 |               23.622 |              24.331 |
-| lua            |            35.126 |          40.110 |           1.206 |               38.904 |              40.078 |
+| implementation | tiny-mix ms | small-mix ms | medium-mix ms | unique-sort ms | medium-mix MB/s | medium-mix adjusted CLI ms |
+| -------------- | ----------: | -----------: | ------------: | -------------: | --------------: | -------------------------: |
+| rust           |       0.011 |        0.192 |         1.763 |          1.786 |           283.6 |                      2.387 |
+| zig            |       0.010 |        0.254 |         2.762 |          3.799 |           181.0 |                      3.254 |
+| cpp            |       0.016 |        0.345 |         3.099 |          5.067 |           161.3 |                      3.770 |
+| c              |       0.011 |        0.304 |         3.148 |          5.191 |           158.8 |                      3.698 |
+| go             |       0.027 |        0.628 |         4.928 |          6.046 |           101.5 |                      5.202 |
+| kotlin         |       0.531 |        1.420 |         5.935 |          7.168 |            84.3 |                     41.528 |
+| csharp         |       0.077 |        1.387 |         8.626 |          8.125 |            58.0 |                     16.565 |
+| haskell        |       0.114 |        0.986 |        11.235 |         12.287 |            44.5 |                     13.950 |
+| javascript     |       0.181 |        1.548 |        13.507 |         14.372 |            37.0 |                     22.438 |
+| php            |       0.281 |        4.833 |        43.718 |         52.726 |            11.4 |                     43.820 |
+| lua            |       0.497 |        8.003 |        66.927 |         72.496 |             7.5 |                     78.248 |
+| elixir         |       0.202 |        2.999 |        72.204 |         70.584 |             6.9 |                     73.021 |
 
 Interpret `warm task mean ms` as the closest benchmark here to an already-running
 service or application doing this task in the middle of a larger workload. It
-does not include process startup or file reads. Interpret `adjusted CLI mean ms`
-as whole-command timing after subtracting the empty-fixture command baseline, not
-as the primary in-process result. The harness builds first, validates the
-requested fixture and generated edge-case fixtures against `tokenfreq-c99`, runs
-warmups for every implementation, then times interleaved samples of both the
-requested fixture and an empty-fixture invocation with the same command options.
+does not include process startup or file reads. The `medium-mix MB/s` column is
+derived from that warm-task mean so scaling is easier to read. Interpret
+`adjusted CLI mean ms` as whole-command timing after subtracting the empty-fixture
+command baseline, not as the primary in-process result. The harness builds
+first, validates every benchmark fixture and generated edge-case fixture against
+`tokenfreq-c99`, runs warmups for every implementation, then times interleaved
+samples of each benchmark fixture and an empty-fixture invocation with the same
+command options.
 
 ## Commands
 
@@ -170,19 +189,22 @@ mise run clean
 Useful benchmark options:
 
 ```sh
-mise run bench -- --fixture=fixtures/spec.txt --top=10 --max-word=1024 --runs=5 --warmups=3 --warm-task-samples=3 --warm-task-runs=50 --warm-task-warmups=10
+mise run bench -- --corpus=default --top=10 --max-word=1024 --runs=5 --warmups=3 --warm-task-samples=3 --warm-task-runs=50 --warm-task-warmups=10
+mise run bench -- --corpus=stress --runs=3 --warm-task-runs=20
+mise run bench -- --fixture=fixtures/spec.txt --runs=5
 mise run validate
 ```
 
-The default `mise run bench` fixture is generated at
-`build/fixtures/benchmark.txt` with repeated words, unique words, and mixed
-ASCII separators; use `--fixture=fixtures/spec.txt` when you want the tiny
-contract fixture instead.
+The default `mise run bench` corpus is generated under
+`build/fixtures/bench-*.txt`. For compatibility, the primary corpus fixture is
+also written to `build/fixtures/benchmark.txt`. Use `--fixture=fixtures/spec.txt`
+when you want the tiny contract fixture instead of the corpus.
 
 There are intentionally no per-language test suites. Correctness is the oracle
-comparison: `mise run validate` checks the requested fixture and a small matrix
-of generated edge-case fixtures against `tokenfreq-c99`. There is also
-intentionally no CI, no Dagger setup, and no GitHub workflow surface.
+comparison: `mise run validate` checks every benchmark fixture, or the supplied
+custom fixture, plus a small matrix of generated edge-case fixtures against
+`tokenfreq-c99`. There is also intentionally no CI, no Dagger setup, and no
+GitHub workflow surface.
 
 ## Standards Surface
 

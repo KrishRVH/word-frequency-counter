@@ -139,7 +139,7 @@ fn bench_json(bytes: &[u8], top: usize, max_word: usize, runs: usize, warmups: u
     format!("{{\"mean_ms\":{mean_ms:.6},\"checksum\":{checksum_value}}}")
 }
 
-fn checksum(result: &WordCounts) -> u64 {
+fn checksum(result: &WordCounts<'_>) -> u64 {
     result
         .top
         .iter()
