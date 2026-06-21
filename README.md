@@ -88,10 +88,17 @@ shortcuts.
 The harness times built release artifacts when a language normally produces one,
 uses the same `--top` and `--max-word` for every timing, and sorts the summary by
 `warm task mean ms`: an already-running, in-process proxy where the fixture is
-read once, the counting function is warmed, and repeated count calls are timed
-inside the language runtime. Raw CLI, startup, and adjusted CLI timings stay
-visible because runtime-heavy languages can spend most of their wall time before
-the scanner does meaningful work.
+read once, the counting function is warmed, and repeated count batches are timed
+inside the language runtime. The harness validates each implementation's hidden
+warm-task checksum against the normal oracle-checked result before it reports
+timings. Raw CLI, startup, and adjusted CLI timings stay visible because
+runtime-heavy languages can spend most of their wall time before the scanner does
+meaningful work.
+
+The per-language CLIs also accept internal `--bench-runs N` and
+`--bench-warmups N` flags. They are intentionally omitted from the public
+contract above; they exist only so `scripts/bench.ts` can measure the warm-task
+case without adding public wrapper scripts or per-language test surfaces.
 
 ## Implementations
 
@@ -105,7 +112,7 @@ the scanner does meaningful work.
 | PHP        | Composer package plus thin bin wrapper | The most standards-heavy dynamic implementation: strict types, value objects, PHPCS, PHPMD, PHPStan, Psalm, Deptrac, and Rector dry-run. The code is more formal because the quality gate is more formal. |
 | C#         | .NET console app                       | Reads bytes with `File.ReadAllBytes`, carries scanner state in an accumulator, and benchmarks the built Release app directly.                                                                             |
 | Lua        | module plus executable script          | Compact table-based scanner with a small CLI wrapper. It is a good example of Lua being direct without pretending to be a static language.                                                                |
-| Kotlin     | Gradle JVM app                         | Uses a byte array, `StringBuilder`, unsigned counts, and locked Gradle tooling. The implementation is clear, and the benchmark subtracts the JVM command startup baseline.                                |
+| Kotlin     | Gradle JVM app                         | Uses a byte array, `StringBuilder`, unsigned counts, and locked Gradle tooling. The warm-task column compares scanner work, while the CLI columns keep JVM startup cost visible.                          |
 | Elixir     | Mix escript                            | Expresses the scanner as a reducer over bytes with immutable maps. It is elegant BEAM code for the problem, not a claim that BEAM is ideal for tiny byte-counting CLIs.                                   |
 | Zig        | single native CLI                      | Explicit allocator ownership, scoped arena lifetime, `StringHashMap`, and low ceremony. It makes the byte-level mechanics visible without C's manual cleanup surface.                                     |
 | Haskell    | GHC-built CLI                          | Strict `ByteString` fold into `Data.Map.Strict`, with pure parse/render/counting pieces. `Map` is a deliberate standard-library caveat rather than an extra dependency for a hash table.                  |
@@ -120,18 +127,18 @@ mise run bench -- --runs=10 --warmups=5
 
 | implementation | warm task mean ms | raw CLI mean ms | startup mean ms | adjusted CLI mean ms | adjusted CLI p95 ms |
 | -------------- | ----------------: | --------------: | --------------: | -------------------: | ------------------: |
-| rust           |             1.355 |           2.344 |           0.720 |                1.625 |               1.801 |
-| zig            |             1.408 |           2.478 |           0.751 |                1.727 |               1.887 |
-| c              |             1.538 |           2.483 |           0.671 |                1.812 |               1.995 |
-| cpp            |             1.564 |           3.012 |           1.105 |                1.907 |               2.124 |
-| go             |             2.445 |           4.337 |           1.386 |                2.951 |               4.167 |
-| kotlin         |             2.577 |          93.361 |          61.441 |               31.919 |              36.140 |
-| csharp         |             3.686 |          53.327 |          43.164 |               10.162 |              11.844 |
-| haskell        |             4.077 |           7.300 |           1.374 |                5.926 |               6.648 |
-| javascript     |             5.233 |          33.136 |          17.534 |               15.601 |              17.450 |
-| elixir         |            11.758 |         253.877 |         239.100 |               14.776 |              24.231 |
-| php            |            22.682 |          34.936 |          10.715 |               24.220 |              25.072 |
-| lua            |            33.951 |          40.420 |           1.229 |               39.191 |              41.236 |
+| rust           |             1.353 |           2.413 |           0.742 |                1.671 |               2.198 |
+| zig            |             1.411 |           2.520 |           0.703 |                1.817 |               2.194 |
+| cpp            |             1.526 |           3.106 |           1.065 |                2.041 |               2.549 |
+| c              |             1.569 |           2.504 |           0.661 |                1.843 |               2.026 |
+| go             |             2.465 |           4.101 |           1.277 |                2.824 |               3.066 |
+| kotlin         |             2.553 |          99.119 |          67.134 |               31.985 |              36.533 |
+| csharp         |             3.601 |          53.160 |          44.635 |                9.339 |              12.092 |
+| haskell        |             4.077 |           7.191 |           1.342 |                5.848 |               6.193 |
+| javascript     |             5.622 |          32.875 |          18.333 |               14.542 |              16.294 |
+| elixir         |            11.770 |         255.330 |         239.702 |               15.627 |              24.810 |
+| php            |            22.031 |          34.167 |          10.545 |               23.622 |              24.331 |
+| lua            |            35.126 |          40.110 |           1.206 |               38.904 |              40.078 |
 
 Interpret `warm task mean ms` as the closest benchmark here to an already-running
 service or application doing this task in the middle of a larger workload. It
@@ -162,7 +169,7 @@ mise run clean
 Useful benchmark options:
 
 ```sh
-mise run bench -- --fixture=fixtures/spec.txt --top=10 --max-word=1024 --runs=5 --warmups=3 --warm-task-runs=50 --warm-task-warmups=10
+mise run bench -- --fixture=fixtures/spec.txt --top=10 --max-word=1024 --runs=5 --warmups=3 --warm-task-samples=3 --warm-task-runs=50 --warm-task-warmups=10
 mise run validate
 ```
 

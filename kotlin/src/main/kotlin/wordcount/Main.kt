@@ -3,6 +3,7 @@ package wordcount
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.Locale
 
 private const val ORACLE_DEFAULT_MAX_WORD = 64
 private const val DEFAULT_TOP = 10
@@ -136,7 +137,7 @@ private fun renderBench(
     }
     val meanMs = (System.nanoTime() - started).toDouble() / NANOS_PER_MILLISECOND / options.benchRuns
 
-    return """{"mean_ms":${"%.6f".format(meanMs)},"checksum":$checksumValue}""" + "\n"
+    return """{"mean_ms":${"%.6f".format(Locale.ROOT, meanMs)},"checksum":$checksumValue}""" + "\n"
 }
 
 private fun checksum(result: Result): Long {
@@ -163,21 +164,31 @@ private data class Options(
             var benchRuns = 0
             var benchWarmups = 0
             var json = false
+            val numberOptions =
+                mapOf<String, (Int) -> Unit>(
+                    "--top" to { top = it },
+                    "--max-word" to { maxWord = it },
+                    "--bench-runs" to { benchRuns = it },
+                    "--bench-warmups" to { benchWarmups = it },
+                )
             var index = 0
 
             while (index < args.size) {
                 val arg = args[index]
-                when {
-                    arg == "--json" -> json = true
-                    arg == "--top" -> top = parseNumber(args.getOrNull(++index))
-                    arg.startsWith("--top=") -> top = parseNumber(arg.substringAfter("="))
-                    arg == "--max-word" -> maxWord = parseNumber(args.getOrNull(++index))
-                    arg.startsWith("--max-word=") -> maxWord = parseNumber(arg.substringAfter("="))
-                    arg == "--bench-runs" -> benchRuns = parseNumber(args.getOrNull(++index))
-                    arg == "--bench-warmups" -> benchWarmups = parseNumber(args.getOrNull(++index))
-                    arg.startsWith("-") -> usage()
-                    path == null -> path = arg
-                    else -> usage()
+                val name = arg.substringBefore("=")
+                val inlineValue = arg.takeIf { it.contains("=") }?.substringAfter("=")
+                val setNumber = numberOptions[name]
+
+                if (name == "--json") {
+                    if (inlineValue == null) json = true else usage()
+                } else if (setNumber != null) {
+                    setNumber(parseNumber(inlineValue ?: args.getOrNull(++index)))
+                } else if (arg.startsWith("-")) {
+                    usage()
+                } else if (path == null) {
+                    path = arg
+                } else {
+                    usage()
                 }
                 index += 1
             }

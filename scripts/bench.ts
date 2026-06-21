@@ -25,6 +25,7 @@ type BenchOptions = {
   maxWord: number;
   runs: number;
   warmups: number;
+  warmTaskSamples: number;
   warmTaskRuns: number;
   warmTaskWarmups: number;
   buildOnly: boolean;
@@ -43,6 +44,7 @@ type BenchmarkState = {
   command: Command;
   startupCommand: Command;
   warmTaskCommand: Command;
+  warmTaskSamples: number[];
   totalSamples: number[];
   startupSamples: number[];
   adjustedSamples: number[];
@@ -55,6 +57,8 @@ type BenchmarkResult = {
   adjustedMeanMs: number;
   adjustedP95Ms: number;
 };
+
+type WarmTaskResult = { mean_ms: number; checksum: number | string };
 
 type SummaryRow = {
   name: string;
@@ -389,8 +393,10 @@ if (!options.buildOnly) {
       options.maxWord,
       options.runs,
       options.warmups,
+      options.warmTaskSamples,
       options.warmTaskRuns,
       options.warmTaskWarmups,
+      checksumResult(expectedCases[0].oracle),
     );
     for (const row of rows) {
       const timing = timings.get(row.name);
@@ -410,6 +416,10 @@ function parseArgs(args: string[]): BenchOptions {
     maxWord: parseDecimal(process.env.WFC_MAX_WORD ?? "1024", "WFC_MAX_WORD"),
     runs: 5,
     warmups: parseDecimal(process.env.WFC_WARMUPS ?? "3", "WFC_WARMUPS"),
+    warmTaskSamples: parseDecimal(
+      process.env.WFC_WARM_TASK_SAMPLES ?? "3",
+      "WFC_WARM_TASK_SAMPLES",
+    ),
     warmTaskRuns: parseDecimal(
       process.env.WFC_WARM_TASK_RUNS ?? "50",
       "WFC_WARM_TASK_RUNS",
@@ -441,6 +451,11 @@ function parseArgs(args: string[]): BenchOptions {
         arg.slice("--warmups=".length),
         "--warmups",
       );
+    else if (arg.startsWith("--warm-task-samples="))
+      parsed.warmTaskSamples = parseDecimal(
+        arg.slice("--warm-task-samples=".length),
+        "--warm-task-samples",
+      );
     else if (arg.startsWith("--warm-task-runs="))
       parsed.warmTaskRuns = parseDecimal(
         arg.slice("--warm-task-runs=".length),
@@ -456,6 +471,8 @@ function parseArgs(args: string[]): BenchOptions {
 
   if (parsed.top <= 0) throw new Error("--top must be greater than 0");
   if (parsed.runs <= 0) throw new Error("--runs must be greater than 0");
+  if (parsed.warmTaskSamples <= 0)
+    throw new Error("--warm-task-samples must be greater than 0");
   if (parsed.warmTaskRuns <= 0)
     throw new Error("--warm-task-runs must be greater than 0");
 
@@ -651,8 +668,10 @@ async function benchmarkAll(
   maxWord: number,
   runs: number,
   warmups: number,
+  warmTaskSamples: number,
   warmTaskRuns: number,
   warmTaskWarmups: number,
+  expectedWarmTaskChecksum: bigint,
 ): Promise<Map<string, BenchmarkResult>> {
   const states: BenchmarkState[] = implementations.map((implementation) => ({
     implementation,
@@ -663,17 +682,24 @@ async function benchmarkAll(
       warmTaskRuns,
       warmTaskWarmups,
     ),
+    warmTaskSamples: [],
     totalSamples: [],
     startupSamples: [],
     adjustedSamples: [],
   }));
 
-  const warmTaskMeans = new Map<string, number>();
   for (const state of states) {
-    warmTaskMeans.set(
+    await validateWarmTask(
       state.implementation.name,
-      await runWarmTask(state.warmTaskCommand),
+      warmTaskCommand(state.command, 1, 0),
+      expectedWarmTaskChecksum,
     );
+  }
+
+  for (let index = 0; index < warmTaskSamples; index += 1) {
+    for (const state of rotated(states, index)) {
+      state.warmTaskSamples.push(await runWarmTask(state.warmTaskCommand));
+    }
   }
 
   for (let index = 0; index < warmups; index += 1) {
@@ -697,7 +723,7 @@ async function benchmarkAll(
     states.map((state) => [
       state.implementation.name,
       {
-        warmTaskMeanMs: warmTaskMeans.get(state.implementation.name) ?? 0,
+        warmTaskMeanMs: mean(state.warmTaskSamples),
         totalMeanMs: mean(state.totalSamples),
         startupMeanMs: mean(state.startupSamples),
         adjustedMeanMs: mean(state.adjustedSamples),
@@ -728,8 +754,49 @@ function warmTaskCommand(command: Command, runs: number, warmups: number) {
 
 async function runWarmTask(command: Command): Promise<number> {
   const output = await run(command);
-  const result = JSON.parse(output) as { mean_ms: number };
+  const result = JSON.parse(output) as WarmTaskResult;
+  if (!Number.isFinite(result.mean_ms) || result.mean_ms < 0) {
+    throw new Error(
+      `${command.cmd} returned invalid warm-task mean: ${output}`,
+    );
+  }
   return result.mean_ms;
+}
+
+async function validateWarmTask(
+  name: string,
+  command: Command,
+  expectedChecksum: bigint,
+) {
+  const output = await run(command);
+  const result = JSON.parse(output) as WarmTaskResult;
+  const actualChecksum = parseChecksum(result.checksum);
+  if (actualChecksum !== expectedChecksum) {
+    throw new Error(
+      `${name} warm-task checksum mismatch\nexpected ${expectedChecksum}\nactual   ${actualChecksum}`,
+    );
+  }
+}
+
+function checksumResult(result: JsonResult) {
+  let checksum = BigInt(result.total) ^ BigInt(result.unique);
+  for (const entry of result.top) {
+    checksum ^= BigInt(entry.count) ^ BigInt(entry.word.length);
+  }
+  return checksum;
+}
+
+function parseChecksum(value: number | string) {
+  if (typeof value === "number") {
+    if (!Number.isSafeInteger(value) || value < 0) {
+      throw new Error(`invalid warm-task checksum: ${value}`);
+    }
+    return BigInt(value);
+  }
+  if (!/^[0-9]+$/.test(value)) {
+    throw new Error(`invalid warm-task checksum: ${value}`);
+  }
+  return BigInt(value);
 }
 
 function rotated<T>(items: T[], offset: number) {

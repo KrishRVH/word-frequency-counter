@@ -167,10 +167,26 @@ local function render_text(result)
   return table.concat(lines, "\n") .. "\n"
 end
 
+local function bxor(left, right)
+  local value = 0
+  local bit = 1
+
+  while left > 0 or right > 0 do
+    if left % 2 ~= right % 2 then
+      value = value + bit
+    end
+    left = math.floor(left / 2)
+    right = math.floor(right / 2)
+    bit = bit * 2
+  end
+
+  return value
+end
+
 local function checksum(result)
-  local value = result.total + result.unique
+  local value = bxor(result.total, result.unique)
   for _, entry in ipairs(result.top) do
-    value = (value + entry.count + #entry.word) % 2147483647
+    value = bxor(bxor(value, entry.count), #entry.word)
   end
   return value
 end
@@ -183,10 +199,10 @@ local function render_bench(bytes, options)
   local checksum_value = 0
   local started = os.clock()
   for _ = 1, options.bench_runs do
-    checksum_value = (
-      checksum_value
-      + checksum(wordcount.count_bytes(bytes, options.top, options.max_word))
-    ) % 2147483647
+    checksum_value = bxor(
+      checksum_value,
+      checksum(wordcount.count_bytes(bytes, options.top, options.max_word))
+    )
   end
   local mean_ms = (os.clock() - started) * 1000 / options.bench_runs
 

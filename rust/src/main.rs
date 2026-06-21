@@ -140,11 +140,10 @@ fn bench_json(bytes: &[u8], top: usize, max_word: usize, runs: usize, warmups: u
 }
 
 fn checksum(result: &WordCounts) -> u64 {
-    result.total
-        ^ result.unique as u64
-        ^ result
-            .top
-            .iter()
-            .map(|entry| entry.count ^ entry.word.len() as u64)
-            .sum::<u64>()
+    result
+        .top
+        .iter()
+        .fold(result.total ^ result.unique as u64, |value, entry| {
+            value ^ entry.count ^ entry.word.len() as u64
+        })
 }

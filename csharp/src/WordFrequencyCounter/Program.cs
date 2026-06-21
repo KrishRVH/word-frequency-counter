@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 
 namespace WordFrequencyCounter;
@@ -59,7 +60,8 @@ internal static class Program {
         stopwatch.Stop();
 
         double meanMs = stopwatch.Elapsed.TotalMilliseconds / options.BenchRuns;
-        return $$"""{"mean_ms":{{meanMs:F6}},"checksum":{{checksum}}}""" + Environment.NewLine;
+        string mean = meanMs.ToString("F6", CultureInfo.InvariantCulture);
+        return $$"""{"mean_ms":{{mean}},"checksum":{{checksum}}}""" + Environment.NewLine;
     }
 
     private static ulong Checksum(Result result) {
@@ -132,5 +134,4 @@ internal sealed record Options(string Path, int Top, int MaxWord, int BenchRuns,
             ? parsed
             : throw new ArgumentException($"{name} must be a number");
     }
-
 }
