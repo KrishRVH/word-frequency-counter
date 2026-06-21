@@ -87,13 +87,14 @@ shortcuts.
 
 The harness times built release artifacts when a language normally produces one,
 uses the same `--top` and `--max-word` for every timing, and sorts the summary by
-the primary corpus fixture's `warm task mean ms`: an already-running, in-process
-proxy where the fixture is read once, the counting function is warmed, and
-repeated count batches are timed inside the language runtime. The harness
+the primary corpus fixture's warm-task mean: an already-running, in-process proxy
+where the fixture is read once, the counting function is warmed, and repeated
+count batches are timed inside the language runtime. The harness
 validates each implementation's hidden warm-task checksum against the normal
-oracle-checked result before it reports timings. Raw CLI, startup, and adjusted
-CLI timings stay visible because runtime-heavy languages can spend most of their
-wall time before the scanner does meaningful work.
+oracle-checked result before it reports timings. Corpus summaries print warm-task
+means for each fixture and the primary fixture's adjusted CLI time. Single-file
+summaries also show raw CLI and startup timings because runtime-heavy languages
+can spend most of their wall time before the scanner does meaningful work.
 
 The per-language CLIs also accept internal `--bench-runs N` and
 `--bench-warmups N` flags. They are intentionally omitted from the public
@@ -112,7 +113,7 @@ case without adding public wrapper scripts or per-language test surfaces.
 | PHP        | Composer package plus thin bin wrapper | The most standards-heavy dynamic implementation: strict types, value objects, PHPCS, PHPMD, PHPStan, Psalm, Deptrac, and Rector dry-run. The code is more formal because the quality gate is more formal.                                      |
 | C#         | .NET console app                       | Reads bytes with `File.ReadAllBytes`, carries scanner state in an accumulator, and benchmarks the built Release app directly.                                                                                                                  |
 | Lua        | module plus executable script          | Compact table-based scanner with a small CLI wrapper. It is a good example of Lua being direct without pretending to be a static language.                                                                                                     |
-| Kotlin     | Gradle JVM app                         | Uses a byte array, `StringBuilder`, unsigned counts, and locked Gradle tooling. The warm-task column compares scanner work, while the CLI columns keep JVM startup cost visible.                                                               |
+| Kotlin     | Gradle JVM app                         | Uses a byte array, `StringBuilder`, unsigned counts, and locked Gradle tooling. The warm-task columns compare scanner work, while the adjusted CLI column keeps JVM startup cost visible.                                                      |
 | Elixir     | Mix escript                            | Expresses the scanner as a reducer over bytes with immutable maps. It is elegant BEAM code for the problem, not a claim that BEAM is ideal for tiny byte-counting CLIs.                                                                        |
 | Zig        | single native CLI                      | Explicit allocator ownership, scoped arena lifetime, `StringHashMap`, and low ceremony. It makes the byte-level mechanics visible without C's manual cleanup surface.                                                                          |
 | Haskell    | GHC-built CLI                          | Strict `ByteString` fold into `Data.Map.Strict`, with pure parse/render/counting pieces. `Map` is a deliberate standard-library caveat rather than an extra dependency for a hash table.                                                       |
@@ -142,31 +143,31 @@ Short local corpus sanity run:
 mise run bench -- --runs=2 --warmups=1 --warm-task-samples=1 --warm-task-runs=10 --warm-task-warmups=3
 ```
 
-| implementation | tiny-mix ms | small-mix ms | medium-mix ms | unique-sort ms | medium-mix MB/s | medium-mix adjusted CLI ms |
-| -------------- | ----------: | -----------: | ------------: | -------------: | --------------: | -------------------------: |
-| rust           |       0.011 |        0.192 |         1.763 |          1.786 |           283.6 |                      2.387 |
-| zig            |       0.010 |        0.254 |         2.762 |          3.799 |           181.0 |                      3.254 |
-| cpp            |       0.016 |        0.345 |         3.099 |          5.067 |           161.3 |                      3.770 |
-| c              |       0.011 |        0.304 |         3.148 |          5.191 |           158.8 |                      3.698 |
-| go             |       0.027 |        0.628 |         4.928 |          6.046 |           101.5 |                      5.202 |
-| kotlin         |       0.531 |        1.420 |         5.935 |          7.168 |            84.3 |                     41.528 |
-| csharp         |       0.077 |        1.387 |         8.626 |          8.125 |            58.0 |                     16.565 |
-| haskell        |       0.114 |        0.986 |        11.235 |         12.287 |            44.5 |                     13.950 |
-| javascript     |       0.181 |        1.548 |        13.507 |         14.372 |            37.0 |                     22.438 |
-| php            |       0.281 |        4.833 |        43.718 |         52.726 |            11.4 |                     43.820 |
-| lua            |       0.497 |        8.003 |        66.927 |         72.496 |             7.5 |                     78.248 |
-| elixir         |       0.202 |        2.999 |        72.204 |         70.584 |             6.9 |                     73.021 |
+| implementation | tiny-mix warm ms | small-mix warm ms | medium-mix warm ms | unique-sort warm ms | medium-mix MB/s | medium-mix adjusted CLI ms |
+| -------------- | ---------------: | ----------------: | -----------------: | ------------------: | --------------: | -------------------------: |
+| rust           |            0.011 |             0.192 |              1.763 |               1.786 |           283.6 |                      2.387 |
+| zig            |            0.010 |             0.254 |              2.762 |               3.799 |           181.0 |                      3.254 |
+| cpp            |            0.016 |             0.345 |              3.099 |               5.067 |           161.3 |                      3.770 |
+| c              |            0.011 |             0.304 |              3.148 |               5.191 |           158.8 |                      3.698 |
+| go             |            0.027 |             0.628 |              4.928 |               6.046 |           101.5 |                      5.202 |
+| kotlin         |            0.531 |             1.420 |              5.935 |               7.168 |            84.3 |                     41.528 |
+| csharp         |            0.077 |             1.387 |              8.626 |               8.125 |            58.0 |                     16.565 |
+| haskell        |            0.114 |             0.986 |             11.235 |              12.287 |            44.5 |                     13.950 |
+| javascript     |            0.181 |             1.548 |             13.507 |              14.372 |            37.0 |                     22.438 |
+| php            |            0.281 |             4.833 |             43.718 |              52.726 |            11.4 |                     43.820 |
+| lua            |            0.497 |             8.003 |             66.927 |              72.496 |             7.5 |                     78.248 |
+| elixir         |            0.202 |             2.999 |             72.204 |              70.584 |             6.9 |                     73.021 |
 
-Interpret `warm task mean ms` as the closest benchmark here to an already-running
-service or application doing this task in the middle of a larger workload. It
-does not include process startup or file reads. The `medium-mix MB/s` column is
-derived from that warm-task mean so scaling is easier to read. Interpret
-`adjusted CLI mean ms` as whole-command timing after subtracting the empty-fixture
-command baseline, not as the primary in-process result. The harness builds
-first, validates every benchmark fixture and generated edge-case fixture against
-`tokenfreq-c99`, runs warmups for every implementation, then times interleaved
-samples of each benchmark fixture and an empty-fixture invocation with the same
-command options.
+Interpret the `warm ms` columns as the closest benchmark here to an
+already-running service or application doing this task in the middle of a larger
+workload. They do not include process startup or file reads. The `medium-mix
+MB/s` column is derived from the `medium-mix warm ms` value so scaling is easier
+to read. Interpret `adjusted CLI ms` as whole-command timing after subtracting
+the empty-fixture command baseline, not as the primary in-process result. The
+harness builds first, validates every benchmark fixture and generated edge-case
+fixture against `tokenfreq-c99`, runs warmups for every implementation, then
+times interleaved samples of each benchmark fixture and an empty-fixture
+invocation with the same command options.
 
 ## Commands
 

@@ -1058,7 +1058,7 @@ function printCorpusSummary(
         Number.POSITIVE_INFINITY),
   );
   const timingColumns = benchmarkFixtures
-    .map((benchmarkFixture) => ` ${benchmarkFixture.name} ms `)
+    .map((benchmarkFixture) => ` ${benchmarkFixture.name} warm ms `)
     .join("|");
   const alignmentColumns = benchmarkFixtures.map(() => "---:").join("|");
 
