@@ -14,6 +14,8 @@ import { pathToFileURL } from "node:url";
 const oracleDefaultMaxWord = 64;
 const maxWordLimit = 1024;
 const minWord = 4;
+const checksumOffset = 2_166_136_261;
+const checksumPrime = 16_777_619;
 const usage = "usage: wordcount_js [--json] [--top N] [--max-word N] <file>";
 
 /**
@@ -204,10 +206,13 @@ function renderBench(bytes, options) {
     checksum(countWords(bytes, options.top, options.maxWord));
   }
 
-  let checksumValue = 0;
+  let checksumValue = checksumOffset;
   const started = performance.now();
   for (let index = 0; index < options.benchRuns; index += 1) {
-    checksumValue ^= checksum(countWords(bytes, options.top, options.maxWord));
+    checksumValue = mixUint32(
+      checksumValue,
+      checksum(countWords(bytes, options.top, options.maxWord)),
+    );
   }
   const meanMs = (performance.now() - started) / options.benchRuns;
 
@@ -219,10 +224,55 @@ function renderBench(bytes, options) {
  * @returns {number}
  */
 function checksum(result) {
-  return result.top.reduce(
-    (value, entry) => value ^ entry.count ^ entry.word.length,
-    result.total ^ result.unique,
-  );
+  let value = checksumOffset;
+  value = mixUint64(value, result.total);
+  value = mixUint64(value, result.unique);
+  for (const entry of result.top) {
+    for (let index = 0; index < entry.word.length; index += 1) {
+      value = mixByte(value, entry.word.charCodeAt(index));
+    }
+    value = mixUint64(value, entry.count);
+  }
+  return value;
+}
+
+/**
+ * @param {number} checksumValue
+ * @param {number} value
+ * @returns {number}
+ */
+function mixByte(checksumValue, value) {
+  return Math.imul(checksumValue ^ value, checksumPrime) >>> 0;
+}
+
+/**
+ * @param {number} checksumValue
+ * @param {number} value
+ * @returns {number}
+ */
+function mixUint32(checksumValue, value) {
+  let remaining = BigInt(value);
+  let mixed = checksumValue;
+  for (let index = 0; index < 4; index += 1) {
+    mixed = mixByte(mixed, Number(remaining & 0xffn));
+    remaining >>= 8n;
+  }
+  return mixed;
+}
+
+/**
+ * @param {number} checksumValue
+ * @param {number} value
+ * @returns {number}
+ */
+function mixUint64(checksumValue, value) {
+  let remaining = BigInt(value);
+  let mixed = checksumValue;
+  for (let index = 0; index < 8; index += 1) {
+    mixed = mixByte(mixed, Number(remaining & 0xffn));
+    remaining >>= 8n;
+  }
+  return mixed;
 }
 
 const invokedUrl = process.argv[1] && pathToFileURL(process.argv[1]).href;

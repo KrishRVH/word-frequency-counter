@@ -48,11 +48,3 @@ use_self = "allow"
 
 [profile.dev]
 overflow-checks = true
-
-[profile.release]
-codegen-units = 1
-debug = false
-opt-level = 3
-overflow-checks = false
-panic = "abort"
-strip = true

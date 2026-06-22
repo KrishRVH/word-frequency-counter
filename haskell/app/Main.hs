@@ -4,13 +4,13 @@ module Main (main) where
 
 import Control.Exception (IOException, evaluate, try)
 import Control.Monad (foldM, forM_)
-import Data.Bits (xor)
+import Data.Bits (shiftR, xor, (.&.))
 import Data.ByteString qualified as ByteString
 import Data.ByteString.Char8 qualified as Char8
 import Data.Char (isDigit)
 import Data.List (intercalate, isPrefixOf, sortBy, stripPrefix)
 import Data.Map.Strict qualified as Map
-import Data.Word (Word8)
+import Data.Word (Word32, Word64, Word8)
 import GHC.Clock (getMonotonicTimeNSec)
 import System.Environment (getArgs)
 import System.Exit (ExitCode (ExitFailure), exitWith)
@@ -31,6 +31,10 @@ oracleDefaultMaxWord, maxWordLimit, minWord :: Int
 oracleDefaultMaxWord = 64
 maxWordLimit = 1024
 minWord = 4
+
+checksumOffset, checksumPrime :: Word32
+checksumOffset = 2166136261
+checksumPrime = 16777619
 
 data Result = Result
   { total :: !Int,
@@ -231,22 +235,48 @@ renderBench options bytes = do
               ( checksum
                   (countBytes options.maxWord options.top input)
               )
-          pure $! value `xor` next
+          pure $! mixUint32 value next
       )
-      0
+      checksumOffset
       [1 .. options.benchRuns]
   finished <- getMonotonicTimeNSec
 
   let meanMs = fromIntegral (finished - started) / 1_000_000 / fromIntegral options.benchRuns :: Double
   pure (printf "{\"mean_ms\":%.6f,\"checksum\":%d}\n" meanMs checksumValue)
 
-checksum :: Result -> Int
+checksum :: Result -> Word32
 {-# NOINLINE checksum #-}
 checksum result =
   foldl'
-    (\value entry -> value `xor` entry.count `xor` ByteString.length entry.word)
-    (result.total `xor` result.unique)
+    ( \value entry ->
+        mixUint64
+          (ByteString.foldl' mixByte value entry.word)
+          (fromIntegral entry.count)
+    )
+    ( mixUint64
+        (mixUint64 checksumOffset (fromIntegral result.total))
+        (fromIntegral result.unique)
+    )
     result.topEntries
+
+mixByte :: Word32 -> Word8 -> Word32
+mixByte checksumValue value = (checksumValue `xor` fromIntegral value) * checksumPrime
+
+mixUint32 :: Word32 -> Word32 -> Word32
+mixUint32 checksumValue value = mixUint checksumValue (fromIntegral value) 4
+
+mixUint64 :: Word32 -> Word64 -> Word32
+mixUint64 checksumValue value = mixUint checksumValue value 8
+
+mixUint :: Word32 -> Word64 -> Int -> Word32
+mixUint checksumValue value bytes =
+  fst $
+    foldl'
+      ( \(current, remaining) _ ->
+          (mixByte current (fromIntegral (remaining .&. 0xff)), remaining `shiftR` 8)
+      )
+      (checksumValue, value)
+      [1 .. bytes]
 
 varyBytes :: Int -> ByteString.ByteString -> IO ByteString.ByteString
 {-# NOINLINE varyBytes #-}

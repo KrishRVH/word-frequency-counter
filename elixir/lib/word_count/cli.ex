@@ -1,6 +1,10 @@
 defmodule WordCount.CLI do
   @moduledoc false
 
+  @checksum_mask 0xFFFFFFFF
+  @checksum_offset 2_166_136_261
+  @checksum_prime 16_777_619
+
   def main(args) do
     with {:ok, options} <- parse(args),
          {:ok, bytes} <- File.read(options.path) do
@@ -113,9 +117,9 @@ defmodule WordCount.CLI do
     started = System.monotonic_time(:nanosecond)
 
     checksum =
-      Enum.reduce(1..options.bench_runs, 0, fn _index, value ->
+      Enum.reduce(1..options.bench_runs, @checksum_offset, fn _index, value ->
         result = WordCount.count_bytes(bytes, options.top, options.max_word)
-        Bitwise.bxor(value, checksum(result))
+        mix_uint32(value, checksum(result))
       end)
 
     mean_ms = (System.monotonic_time(:nanosecond) - started) / 1_000_000 / options.bench_runs
@@ -123,10 +127,32 @@ defmodule WordCount.CLI do
   end
 
   defp checksum(result) do
-    Enum.reduce(result.top, Bitwise.bxor(result.total, result.unique), fn entry, value ->
-      value
-      |> Bitwise.bxor(entry.count)
-      |> Bitwise.bxor(byte_size(entry.word))
+    initial =
+      @checksum_offset
+      |> mix_uint64(result.total)
+      |> mix_uint64(result.unique)
+
+    Enum.reduce(result.top, initial, fn entry, value ->
+      entry.word
+      |> :binary.bin_to_list()
+      |> Enum.reduce(value, &mix_byte(&2, &1))
+      |> mix_uint64(entry.count)
     end)
+  end
+
+  defp mix_byte(checksum, value),
+    do: Bitwise.band(Bitwise.bxor(checksum, value) * @checksum_prime, @checksum_mask)
+
+  defp mix_uint32(checksum, value), do: mix_uint(checksum, value, 4)
+
+  defp mix_uint64(checksum, value), do: mix_uint(checksum, value, 8)
+
+  defp mix_uint(checksum, value, bytes) do
+    {checksum, _value} =
+      Enum.reduce(1..bytes, {checksum, value}, fn _index, {current, remaining} ->
+        {mix_byte(current, Bitwise.band(remaining, 0xFF)), Bitwise.bsr(remaining, 8)}
+      end)
+
+    checksum
   end
 end

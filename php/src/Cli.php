@@ -11,6 +11,9 @@ use Throwable;
 final class Cli
 {
     private const string USAGE = "usage: php/bin/wordcount [--json] [--top N] [--max-word N] <file>\n";
+    private const int CHECKSUM_OFFSET = 2_166_136_261;
+    private const int CHECKSUM_PRIME = 16_777_619;
+    private const int CHECKSUM_MOD = 4_294_967_296;
     private const array NUMBER_OPTIONS = [
         'top' => ['--top', '--top='],
         'maxWord' => ['--max-word', '--max-word='],
@@ -210,14 +213,21 @@ final class Cli
             throw new RuntimeException("cannot read {$options->path}");
         }
 
-        $checksum = 0;
+        $checksum = self::CHECKSUM_OFFSET;
         for ($index = 0; $index < $options->benchWarmups; $index++) {
-            $checksum ^= self::checksum($counter->countBytes($bytes, $options->top, $options->maxWord));
+            $checksum = self::mixUint32(
+                $checksum,
+                self::checksum($counter->countBytes($bytes, $options->top, $options->maxWord)),
+            );
         }
 
+        $checksum = self::CHECKSUM_OFFSET;
         $started = hrtime(true);
         for ($index = 0; $index < $options->benchRuns; $index++) {
-            $checksum ^= self::checksum($counter->countBytes($bytes, $options->top, $options->maxWord));
+            $checksum = self::mixUint32(
+                $checksum,
+                self::checksum($counter->countBytes($bytes, $options->top, $options->maxWord)),
+            );
         }
         $meanMs = ((float) (hrtime(true) - $started)) / 1_000_000.0 / (float) $options->benchRuns;
 
@@ -229,9 +239,40 @@ final class Cli
 
     private static function checksum(Result $result): int
     {
-        $checksum = $result->total ^ $result->unique;
+        $checksum = self::CHECKSUM_OFFSET;
+        $checksum = self::mixUint64($checksum, $result->total);
+        $checksum = self::mixUint64($checksum, $result->unique);
         foreach ($result->top as $entry) {
-            $checksum ^= $entry->count ^ strlen($entry->word);
+            $length = strlen($entry->word);
+            for ($index = 0; $index < $length; $index++) {
+                $checksum = self::mixByte($checksum, ord($entry->word[$index]));
+            }
+            $checksum = self::mixUint64($checksum, $entry->count);
+        }
+
+        return $checksum;
+    }
+
+    private static function mixByte(int $checksum, int $value): int
+    {
+        return (($checksum ^ $value) * self::CHECKSUM_PRIME) % self::CHECKSUM_MOD;
+    }
+
+    private static function mixUint32(int $checksum, int $value): int
+    {
+        for ($index = 0; $index < 4; $index++) {
+            $checksum = self::mixByte($checksum, $value % 256);
+            $value = intdiv($value, 256);
+        }
+
+        return $checksum;
+    }
+
+    private static function mixUint64(int $checksum, int $value): int
+    {
+        for ($index = 0; $index < 8; $index++) {
+            $checksum = self::mixByte($checksum, $value % 256);
+            $value = intdiv($value, 256);
         }
 
         return $checksum;

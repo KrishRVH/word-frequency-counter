@@ -18,6 +18,11 @@ type output struct {
 	Top    []wordcount.Entry `json:"top"`
 }
 
+const (
+	checksumOffset uint32 = 2_166_136_261
+	checksumPrime  uint32 = 16_777_619
+)
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -101,9 +106,9 @@ func printBench(bytes []byte, top, maxWord, runs, warmups int) error {
 	}
 
 	started := time.Now()
-	checksumValue := uint64(0)
+	checksumValue := checksumOffset
 	for range runs {
-		checksumValue ^= checksum(wordcount.CountBytes(bytes, maxWord), top)
+		checksumValue = mixUint32(checksumValue, checksum(wordcount.CountBytes(bytes, maxWord), top))
 	}
 	meanMs := float64(time.Since(started).Nanoseconds()) / 1_000_000.0 / float64(runs)
 
@@ -111,11 +116,36 @@ func printBench(bytes []byte, top, maxWord, runs, warmups int) error {
 	return nil
 }
 
-func checksum(result wordcount.Result, top int) uint64 {
+func checksum(result wordcount.Result, top int) uint32 {
+	value := checksumOffset
+	value = mixUint64(value, result.Total)
 	// #nosec G115 -- Unique is len(counts), so it is non-negative and input-bounded.
-	value := result.Total ^ uint64(result.Unique)
+	value = mixUint64(value, uint64(result.Unique))
 	for _, entry := range wordcount.Top(result, top) {
-		value ^= entry.Count ^ uint64(len(entry.Word))
+		for index := range entry.Word {
+			value = mixByte(value, entry.Word[index])
+		}
+		value = mixUint64(value, entry.Count)
 	}
 	return value
+}
+
+func mixByte(checksum uint32, value byte) uint32 {
+	return (checksum ^ uint32(value)) * checksumPrime
+}
+
+func mixUint32(checksum, value uint32) uint32 {
+	for range 4 {
+		checksum = mixByte(checksum, byte(value&0xff))
+		value >>= 8
+	}
+	return checksum
+}
+
+func mixUint64(checksum uint32, value uint64) uint32 {
+	for range 8 {
+		checksum = mixByte(checksum, byte(value&0xff))
+		value >>= 8
+	}
+	return checksum
 }

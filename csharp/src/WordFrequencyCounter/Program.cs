@@ -4,6 +4,9 @@ using System.Text.Json;
 namespace WordFrequencyCounter;
 
 internal static class Program {
+    private const uint ChecksumOffset = 2_166_136_261;
+    private const uint ChecksumPrime = 16_777_619;
+
     private static int Main(string[] args) {
         try {
             Options options = Options.Parse(args);
@@ -52,10 +55,10 @@ internal static class Program {
             _ = Checksum(WordCounter.CountBytes(bytes, options.Top, options.MaxWord));
         }
 
-        ulong checksum = 0;
+        uint checksum = ChecksumOffset;
         System.Diagnostics.Stopwatch stopwatch = System.Diagnostics.Stopwatch.StartNew();
         for (int index = 0; index < options.BenchRuns; index++) {
-            checksum ^= Checksum(WordCounter.CountBytes(bytes, options.Top, options.MaxWord));
+            checksum = MixUint32(checksum, Checksum(WordCounter.CountBytes(bytes, options.Top, options.MaxWord)));
         }
         stopwatch.Stop();
 
@@ -64,10 +67,35 @@ internal static class Program {
         return $$"""{"mean_ms":{{mean}},"checksum":{{checksum}}}""" + Environment.NewLine;
     }
 
-    private static ulong Checksum(Result result) {
-        ulong checksum = result.Total ^ (ulong) result.Unique;
+    private static uint Checksum(Result result) {
+        uint checksum = ChecksumOffset;
+        checksum = MixUint64(checksum, result.Total);
+        checksum = MixUint64(checksum, (ulong) result.Unique);
         foreach (Entry entry in result.Top) {
-            checksum ^= entry.Count ^ (ulong) entry.Word.Length;
+            foreach (char character in entry.Word) {
+                checksum = MixByte(checksum, (byte) character);
+            }
+            checksum = MixUint64(checksum, entry.Count);
+        }
+        return checksum;
+    }
+
+    private static uint MixByte(uint checksum, byte value) {
+        return unchecked((checksum ^ value) * ChecksumPrime);
+    }
+
+    private static uint MixUint32(uint checksum, uint value) {
+        for (int index = 0; index < 4; index++) {
+            checksum = MixByte(checksum, (byte) (value & 0xff));
+            value >>= 8;
+        }
+        return checksum;
+    }
+
+    private static uint MixUint64(uint checksum, ulong value) {
+        for (int index = 0; index < 8; index++) {
+            checksum = MixByte(checksum, (byte) (value & 0xff));
+            value >>= 8;
         }
         return checksum;
     }

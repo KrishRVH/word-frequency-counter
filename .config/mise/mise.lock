@@ -1055,13 +1055,6 @@ backend = "core:erlang"
 
 [tools.erlang.options]
 precompiled = "if_available"
-precompiled_os = "ubuntu-24.04"
-
-[tools.erlang."platforms.linux-x64"]
-url = "https://builds.hex.pm/builds/otp/amd64/ubuntu-24.04/OTP-29.0.2.tar.gz"
-
-[tools.erlang."platforms.linux-x64-baseline"]
-url = "https://builds.hex.pm/builds/otp/amd64/ubuntu-24.04/OTP-29.0.2.tar.gz"
 
 [[tools.ghcup]]
 version = "0.2.6.2"

@@ -20,6 +20,8 @@ constexpr auto default_max_word = std::size_t{ 64 };
 constexpr auto estimated_bytes_per_unique_word = std::size_t{ 32 };
 constexpr auto max_word_limit = std::size_t{ 1024 };
 constexpr auto min_word = std::size_t{ 4 };
+constexpr auto checksum_offset = std::uint32_t{ 2'166'136'261U };
+constexpr auto checksum_prime = std::uint32_t{ 16'777'619U };
 constexpr auto usage =
         "usage: wordcount_cpp [--json] [--top N] [--max-word N] <file>";
 
@@ -243,11 +245,44 @@ void render_text(const Result &result)
     std::println("total {}\nunique {}", result.total, result.unique);
 }
 
-[[nodiscard]] auto checksum(const Result &result) -> std::uint64_t
+[[nodiscard]] auto mix_byte(std::uint32_t checksum, unsigned char byte)
+        -> std::uint32_t
 {
-    auto value = result.total ^ static_cast<std::uint64_t>(result.unique);
+    return (checksum ^ static_cast<std::uint32_t>(byte)) * checksum_prime;
+}
+
+[[nodiscard]] auto mix_u32(std::uint32_t checksum, std::uint32_t value)
+        -> std::uint32_t
+{
+    for (auto index = 0; index < 4; ++index) {
+        checksum =
+                mix_byte(checksum, static_cast<unsigned char>(value & 0xffU));
+        value >>= 8U;
+    }
+    return checksum;
+}
+
+[[nodiscard]] auto mix_u64(std::uint32_t checksum, std::uint64_t value)
+        -> std::uint32_t
+{
+    for (auto index = 0; index < 8; ++index) {
+        checksum =
+                mix_byte(checksum, static_cast<unsigned char>(value & 0xffU));
+        value >>= 8U;
+    }
+    return checksum;
+}
+
+[[nodiscard]] auto checksum(const Result &result) -> std::uint32_t
+{
+    auto value = checksum_offset;
+    value = mix_u64(value, result.total);
+    value = mix_u64(value, static_cast<std::uint64_t>(result.unique));
     for (const auto &entry : result.top) {
-        value ^= entry.count ^ static_cast<std::uint64_t>(entry.word.size());
+        for (const auto byte : entry.word) {
+            value = mix_byte(value, static_cast<unsigned char>(byte));
+        }
+        value = mix_u64(value, entry.count);
     }
     return value;
 }
@@ -259,11 +294,12 @@ void render_bench(const std::vector<unsigned char> &bytes,
         (void)checksum(count_words(bytes, options.top, options.max_word));
     }
 
-    auto checksum_value = std::uint64_t{};
+    auto checksum_value = checksum_offset;
     const auto started = std::chrono::steady_clock::now();
     for (std::size_t index = 0; index < options.bench_runs; ++index) {
-        checksum_value ^=
-                checksum(count_words(bytes, options.top, options.max_word));
+        checksum_value = mix_u32(
+                checksum_value,
+                checksum(count_words(bytes, options.top, options.max_word)));
     }
     const auto elapsed = std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - started);

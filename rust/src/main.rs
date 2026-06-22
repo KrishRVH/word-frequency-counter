@@ -5,6 +5,8 @@ use std::time::Instant;
 
 use word_frequency_counter_rust::{WordCounts, count_words, render_json, render_text};
 
+const CHECKSUM_OFFSET: u32 = 2_166_136_261;
+const CHECKSUM_PRIME: u32 = 16_777_619;
 const USAGE: &str = "usage: wordcount_rust [--json] [--top N] [--max-word N] <file>";
 
 struct Options {
@@ -130,20 +132,44 @@ fn bench_json(bytes: &[u8], top: usize, max_word: usize, runs: usize, warmups: u
     }
 
     let started = Instant::now();
-    let mut checksum_value = 0u64;
+    let mut checksum_value = CHECKSUM_OFFSET;
     for _ in 0..runs {
-        checksum_value ^= checksum(&count_words(bytes, top, max_word));
+        checksum_value = mix_u32(checksum_value, checksum(&count_words(bytes, top, max_word)));
     }
     let mean_ms = started.elapsed().as_secs_f64() * 1_000.0 / runs as f64;
 
     format!("{{\"mean_ms\":{mean_ms:.6},\"checksum\":{checksum_value}}}")
 }
 
-fn checksum(result: &WordCounts<'_>) -> u64 {
-    result
-        .top
-        .iter()
-        .fold(result.total ^ result.unique as u64, |value, entry| {
-            value ^ entry.count ^ entry.word.len() as u64
-        })
+fn checksum(result: &WordCounts<'_>) -> u32 {
+    let mut value = CHECKSUM_OFFSET;
+    value = mix_u64(value, result.total);
+    value = mix_u64(value, result.unique as u64);
+    for entry in &result.top {
+        for &byte in entry.word.as_ref() {
+            value = mix_byte(value, byte);
+        }
+        value = mix_u64(value, entry.count);
+    }
+    value
+}
+
+fn mix_byte(checksum: u32, byte: u8) -> u32 {
+    (checksum ^ u32::from(byte)).wrapping_mul(CHECKSUM_PRIME)
+}
+
+fn mix_u32(mut checksum: u32, mut value: u32) -> u32 {
+    for _ in 0..4 {
+        checksum = mix_byte(checksum, (value & 0xff) as u8);
+        value >>= 8;
+    }
+    checksum
+}
+
+fn mix_u64(mut checksum: u32, mut value: u64) -> u32 {
+    for _ in 0..8 {
+        checksum = mix_byte(checksum, (value & 0xff) as u8);
+        value >>= 8;
+    }
+    checksum
 }

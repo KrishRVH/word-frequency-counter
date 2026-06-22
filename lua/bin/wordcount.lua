@@ -167,6 +167,11 @@ local function render_text(result)
   return table.concat(lines, "\n") .. "\n"
 end
 
+local checksum_offset = 2166136261
+local checksum_prime = 16777619
+local checksum_mod = 4294967296
+local checksum_half = 65536
+
 local function bxor(left, right)
   local value = 0
   local bit = 1
@@ -183,10 +188,44 @@ local function bxor(left, right)
   return value
 end
 
+local function fnv_multiply(value)
+  local low = value % checksum_half
+  local high = math.floor(value / checksum_half)
+  return (
+    low * checksum_prime
+    + (high * checksum_prime % checksum_half) * checksum_half
+  ) % checksum_mod
+end
+
+local function mix_byte(checksum, value)
+  return fnv_multiply(bxor(checksum, value))
+end
+
+local function mix_uint(checksum, value, bytes)
+  for _ = 1, bytes do
+    checksum = mix_byte(checksum, value % 256)
+    value = math.floor(value / 256)
+  end
+  return checksum
+end
+
+local function mix_uint32(checksum, value)
+  return mix_uint(checksum, value, 4)
+end
+
+local function mix_uint64(checksum, value)
+  return mix_uint(checksum, value, 8)
+end
+
 local function checksum(result)
-  local value = bxor(result.total, result.unique)
+  local value = checksum_offset
+  value = mix_uint64(value, result.total)
+  value = mix_uint64(value, result.unique)
   for _, entry in ipairs(result.top) do
-    value = bxor(bxor(value, entry.count), #entry.word)
+    for index = 1, #entry.word do
+      value = mix_byte(value, string.byte(entry.word, index))
+    end
+    value = mix_uint64(value, entry.count)
   end
   return value
 end
@@ -196,10 +235,10 @@ local function render_bench(bytes, options)
     checksum(wordcount.count_bytes(bytes, options.top, options.max_word))
   end
 
-  local checksum_value = 0
+  local checksum_value = checksum_offset
   local started = os.clock()
   for _ = 1, options.bench_runs do
-    checksum_value = bxor(
+    checksum_value = mix_uint32(
       checksum_value,
       checksum(wordcount.count_bytes(bytes, options.top, options.max_word))
     )

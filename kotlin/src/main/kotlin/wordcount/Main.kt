@@ -13,6 +13,12 @@ private const val MIN_WORD = 4
 private const val ASCII_CASE_BIT = 32
 private const val BYTE_MASK = 0xff
 private const val NANOS_PER_MILLISECOND = 1_000_000.0
+private const val CHECKSUM_MASK = 0xffff_ffffL
+private const val CHECKSUM_OFFSET = 2_166_136_261L
+private const val CHECKSUM_PRIME = 16_777_619L
+private const val CHECKSUM_BYTE_BYTES = 1
+private const val CHECKSUM_U32_BYTES = 4
+private const val CHECKSUM_U64_BYTES = 8
 
 data class Entry(
     val word: String,
@@ -126,26 +132,50 @@ private fun renderBench(
     bytes: ByteArray,
     options: Options,
 ): String {
-    var checksumValue = 0L
-    repeat(options.benchWarmups) {
-        checksumValue = checksumValue xor checksum(countBytes(bytes, options.top, options.maxWord))
+    fun checksum(result: Result): Long {
+        var checksum = CHECKSUM_OFFSET
+        checksum = mixChecksum(checksum, result.total, CHECKSUM_U64_BYTES)
+        checksum = mixChecksum(checksum, result.unique.toLong(), CHECKSUM_U64_BYTES)
+        for (entry in result.top) {
+            for (character in entry.word) {
+                checksum = mixChecksum(checksum, character.code.toLong(), CHECKSUM_BYTE_BYTES)
+            }
+            checksum = mixChecksum(checksum, entry.count, CHECKSUM_U64_BYTES)
+        }
+        return checksum
     }
 
+    repeat(options.benchWarmups) {
+        checksum(countBytes(bytes, options.top, options.maxWord))
+    }
+
+    var checksumValue = CHECKSUM_OFFSET
     val started = System.nanoTime()
     repeat(options.benchRuns) {
-        checksumValue = checksumValue xor checksum(countBytes(bytes, options.top, options.maxWord))
+        checksumValue =
+            mixChecksum(
+                checksumValue,
+                checksum(countBytes(bytes, options.top, options.maxWord)),
+                CHECKSUM_U32_BYTES,
+            )
     }
     val meanMs = (System.nanoTime() - started).toDouble() / NANOS_PER_MILLISECOND / options.benchRuns
 
     return """{"mean_ms":${"%.6f".format(Locale.ROOT, meanMs)},"checksum":$checksumValue}""" + "\n"
 }
 
-private fun checksum(result: Result): Long {
-    var checksum = result.total xor result.unique.toLong()
-    for (entry in result.top) {
-        checksum = checksum xor entry.count xor entry.word.length.toLong()
+private fun mixChecksum(
+    checksum: Long,
+    value: Long,
+    bytes: Int,
+): Long {
+    var mixed = checksum
+    var remaining = value
+    repeat(bytes) {
+        mixed = ((mixed xor (remaining and BYTE_MASK.toLong())) * CHECKSUM_PRIME) and CHECKSUM_MASK
+        remaining = remaining ushr Byte.SIZE_BITS
     }
-    return checksum
+    return mixed
 }
 
 private data class Options(

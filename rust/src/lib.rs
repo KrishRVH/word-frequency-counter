@@ -1,18 +1,14 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::collections::hash_map::RandomState;
 use std::fmt::Write as _;
-use std::sync::LazyLock;
 
 const DEFAULT_MAX_WORD: usize = 64;
 const ESTIMATED_BYTES_PER_UNIQUE_WORD: usize = 32;
 const MAX_WORD: usize = 1024;
 const MIN_WORD: usize = 4;
 
-static HASH_STATE: LazyLock<RandomState> = LazyLock::new(RandomState::new);
-
-type WordMap<'a> = HashMap<Cow<'a, [u8]>, u64, RandomState>;
+type WordMap<'a> = HashMap<Cow<'a, [u8]>, u64>;
 type CountedWord<'a> = (Cow<'a, [u8]>, u64);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -31,8 +27,7 @@ pub struct WordCounts<'a> {
 #[must_use]
 pub fn count_words(bytes: &[u8], limit: usize, max_word: usize) -> WordCounts<'_> {
     let max_word = normalize_max_word(max_word);
-    let mut counts =
-        WordMap::with_capacity_and_hasher(estimated_unique_words(bytes), (*HASH_STATE).clone());
+    let mut counts = WordMap::with_capacity(estimated_unique_words(bytes));
     let mut folded = Vec::new();
     let mut total = 0u64;
     let mut cursor = 0usize;

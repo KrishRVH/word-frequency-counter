@@ -11,6 +11,7 @@ type Command = {
   cwd?: string;
   cmd: string;
   args: string[];
+  env?: Record<string, string>;
 };
 
 type Implementation = {
@@ -38,9 +39,12 @@ type ValidationCase = {
   fixture: string;
   top: number;
   maxWord: number;
+  argStyle?: ValidationArgStyle;
 };
 
-type CorpusProfile = "mixed" | "unique" | "repeated" | "long";
+type ValidationArgStyle = "separated" | "top-equals" | "max-word-equals";
+
+type CorpusProfile = "mixed" | "unique" | "repeated" | "long" | "case-fold";
 
 type CorpusSpec = {
   name: string;
@@ -108,6 +112,9 @@ const benchmarkWords = [
   "theta",
 ];
 const benchmarkSeparators = [" ", "\n", ",", "--", "123", "\t", "!!"];
+const checksumOffset = 2_166_136_261n;
+const checksumPrime = 16_777_619n;
+const checksumMask = 0xffff_ffffn;
 const corpusDefinitions = new Map<string, CorpusSpec[]>([
   [
     "default",
@@ -136,6 +143,12 @@ const corpusDefinitions = new Map<string, CorpusSpec[]>([
         targetBytes: 512 * 1024,
         profile: "unique",
         description: "mostly unique words, stressing allocation and sort",
+      },
+      {
+        name: "case-fold-mix",
+        targetBytes: 512 * 1024,
+        profile: "case-fold",
+        description: "mixed-case repeats, exposing ASCII normalization cost",
       },
     ],
   ],
@@ -166,6 +179,12 @@ const corpusDefinitions = new Map<string, CorpusSpec[]>([
         targetBytes: 512 * 1024,
         profile: "unique",
         description: "mostly unique words, stressing allocation and sort",
+      },
+      {
+        name: "case-fold-mix",
+        targetBytes: 512 * 1024,
+        profile: "case-fold",
+        description: "mixed-case repeats, exposing ASCII normalization cost",
       },
       {
         name: "repeated-scan",
@@ -360,8 +379,18 @@ const implementations: Implementation[] = [
   {
     name: "elixir",
     build: [
-      { cwd: join(root, "elixir"), cmd: "mix", args: ["deps.get"] },
-      { cwd: join(root, "elixir"), cmd: "mix", args: ["escript.build"] },
+      {
+        cwd: join(root, "elixir"),
+        cmd: "mix",
+        args: ["deps.get"],
+        env: { MIX_ENV: "prod" },
+      },
+      {
+        cwd: join(root, "elixir"),
+        cmd: "mix",
+        args: ["escript.build"],
+        env: { MIX_ENV: "prod" },
+      },
     ],
     run: (fixture, top, maxWord) => ({
       cmd: join(root, "elixir/word_count"),
@@ -475,6 +504,7 @@ if (!options.buildOnly) {
         testCase.fixture,
         testCase.top,
         testCase.maxWord,
+        testCase.argStyle,
       );
       assertSame(`${implementation.name} (${testCase.name})`, oracle, result);
     }
@@ -644,6 +674,41 @@ function createValidationCases(
       top: 3,
       maxWord: 1024,
     },
+    {
+      name: "top-equals",
+      content: "b a c a b a d d d e\n",
+      top: 3,
+      maxWord: 1024,
+      argStyle: "top-equals" as const,
+    },
+    {
+      name: "max-word-equals",
+      content: "alphabet abcde abcdef ABCDEF\n",
+      top: 10,
+      maxWord: 5,
+      argStyle: "max-word-equals" as const,
+    },
+    {
+      name: "max-word-equals-default",
+      content: `${"A".repeat(80)} ${"a".repeat(64)} ${"b".repeat(65)}\n`,
+      top: 10,
+      maxWord: 0,
+      argStyle: "max-word-equals" as const,
+    },
+    {
+      name: "max-word-equals-min-clamp",
+      content: "alphabet alpha alphanumeric ALPHABET\n",
+      top: 10,
+      maxWord: 1,
+      argStyle: "max-word-equals" as const,
+    },
+    {
+      name: "max-word-equals-max-clamp",
+      content: `${"A".repeat(1100)} ${"a".repeat(1024)}\n`,
+      top: 10,
+      maxWord: 999_999,
+      argStyle: "max-word-equals" as const,
+    },
   ];
 
   return [
@@ -658,6 +723,7 @@ function createValidationCases(
       fixture: writeValidationFixture(testCase.name, testCase.content),
       top: testCase.top,
       maxWord: testCase.maxWord,
+      argStyle: testCase.argStyle,
     })),
   ];
 }
@@ -727,6 +793,9 @@ function corpusWord(profile: CorpusProfile, index: number) {
   if (profile === "repeated") {
     return benchmarkWords[index % benchmarkWords.length];
   }
+  if (profile === "case-fold") {
+    return caseFoldWord(index);
+  }
   if (profile === "long") {
     const base = benchmarkWords[index % benchmarkWords.length].toLowerCase();
     return `${base}${syntheticWord(index).repeat(16)}`;
@@ -756,6 +825,30 @@ function syntheticWord(value: number) {
     number = Math.floor(number / 26);
   }
   return word + "x".repeat(suffix);
+}
+
+function caseFoldWord(index: number) {
+  const base =
+    index % 6 === 0
+      ? benchmarkWords[index % benchmarkWords.length].toLowerCase()
+      : syntheticWord(Math.floor(index / 4));
+  if (index % 4 === 0) return base.toUpperCase();
+  if (index % 4 === 1) return titleCase(base);
+  if (index % 4 === 2) return alternateCase(base);
+  return base;
+}
+
+function titleCase(word: string) {
+  return word[0].toUpperCase() + word.slice(1);
+}
+
+function alternateCase(word: string) {
+  let result = "";
+  for (let index = 0; index < word.length; index += 1) {
+    result +=
+      index % 2 === 0 ? word[index].toUpperCase() : word[index].toLowerCase();
+  }
+  return result;
 }
 
 function parseDecimal(value: string, name: string) {
@@ -832,9 +925,41 @@ async function runJson(
   fixture: string,
   top: number,
   maxWord: number,
+  argStyle: ValidationArgStyle = "separated",
 ): Promise<JsonResult> {
-  const output = await run(implementation.run(fixture, top, maxWord));
+  const command = implementation.run(fixture, top, maxWord);
+  const output = await run({
+    ...command,
+    args: validationArgs(command.args, top, maxWord, argStyle),
+  });
   return JSON.parse(output) as JsonResult;
+}
+
+function validationArgs(
+  args: string[],
+  top: number,
+  maxWord: number,
+  argStyle: ValidationArgStyle,
+) {
+  if (argStyle === "top-equals") {
+    return replaceSeparatedArg(args, "--top", `--top=${top}`);
+  }
+  if (argStyle === "max-word-equals") {
+    return replaceSeparatedArg(args, "--max-word", `--max-word=${maxWord}`);
+  }
+  return args;
+}
+
+function replaceSeparatedArg(
+  args: string[],
+  flag: string,
+  replacement: string,
+) {
+  const index = args.indexOf(flag);
+  if (index < 0) {
+    throw new Error(`missing ${flag} in generated command`);
+  }
+  return [...args.slice(0, index), replacement, ...args.slice(index + 2)];
 }
 
 async function benchmarkAll(
@@ -849,6 +974,14 @@ async function benchmarkAll(
   warmTaskWarmups: number,
   expectedWarmTaskChecksum: bigint,
 ): Promise<Map<string, BenchmarkResult>> {
+  const expectedPreflightChecksum = aggregateChecksum(
+    expectedWarmTaskChecksum,
+    1,
+  );
+  const expectedSampleChecksum = aggregateChecksum(
+    expectedWarmTaskChecksum,
+    warmTaskRuns,
+  );
   const states: BenchmarkState[] = implementations.map((implementation) => ({
     implementation,
     command: implementation.run(fixture, top, maxWord),
@@ -868,13 +1001,19 @@ async function benchmarkAll(
     await validateWarmTask(
       state.implementation.name,
       warmTaskCommand(state.command, 1, 0),
-      expectedWarmTaskChecksum,
+      expectedPreflightChecksum,
     );
   }
 
   for (let index = 0; index < warmTaskSamples; index += 1) {
     for (const state of rotated(states, index)) {
-      state.warmTaskSamples.push(await runWarmTask(state.warmTaskCommand));
+      state.warmTaskSamples.push(
+        await runWarmTask(
+          state.implementation.name,
+          state.warmTaskCommand,
+          expectedSampleChecksum,
+        ),
+      );
     }
   }
 
@@ -928,7 +1067,11 @@ function warmTaskCommand(command: Command, runs: number, warmups: number) {
   };
 }
 
-async function runWarmTask(command: Command): Promise<number> {
+async function runWarmTask(
+  name: string,
+  command: Command,
+  expectedChecksum: bigint,
+): Promise<number> {
   const output = await run(command);
   const result = JSON.parse(output) as WarmTaskResult;
   if (!Number.isFinite(result.mean_ms) || result.mean_ms < 0) {
@@ -936,6 +1079,7 @@ async function runWarmTask(command: Command): Promise<number> {
       `${command.cmd} returned invalid warm-task mean: ${output}`,
     );
   }
+  assertWarmTaskChecksum(name, result, expectedChecksum);
   return result.mean_ms;
 }
 
@@ -946,6 +1090,14 @@ async function validateWarmTask(
 ) {
   const output = await run(command);
   const result = JSON.parse(output) as WarmTaskResult;
+  assertWarmTaskChecksum(name, result, expectedChecksum);
+}
+
+function assertWarmTaskChecksum(
+  name: string,
+  result: WarmTaskResult,
+  expectedChecksum: bigint,
+) {
   const actualChecksum = parseChecksum(result.checksum);
   if (actualChecksum !== expectedChecksum) {
     throw new Error(
@@ -955,11 +1107,48 @@ async function validateWarmTask(
 }
 
 function checksumResult(result: JsonResult) {
-  let checksum = BigInt(result.total) ^ BigInt(result.unique);
+  let checksum = checksumOffset;
+  checksum = mixUint64(checksum, BigInt(result.total));
+  checksum = mixUint64(checksum, BigInt(result.unique));
   for (const entry of result.top) {
-    checksum ^= BigInt(entry.count) ^ BigInt(entry.word.length);
+    for (let index = 0; index < entry.word.length; index += 1) {
+      checksum = mixByte(checksum, entry.word.charCodeAt(index));
+    }
+    checksum = mixUint64(checksum, BigInt(entry.count));
   }
   return checksum;
+}
+
+function aggregateChecksum(runChecksum: bigint, runs: number) {
+  let checksum = checksumOffset;
+  for (let index = 0; index < runs; index += 1) {
+    checksum = mixUint32(checksum, runChecksum);
+  }
+  return checksum;
+}
+
+function mixUint64(checksum: bigint, value: bigint) {
+  let remaining = value;
+  let mixed = checksum;
+  for (let index = 0; index < 8; index += 1) {
+    mixed = mixByte(mixed, Number(remaining & 0xffn));
+    remaining >>= 8n;
+  }
+  return mixed;
+}
+
+function mixUint32(checksum: bigint, value: bigint) {
+  let remaining = value;
+  let mixed = checksum;
+  for (let index = 0; index < 4; index += 1) {
+    mixed = mixByte(mixed, Number(remaining & 0xffn));
+    remaining >>= 8n;
+  }
+  return mixed;
+}
+
+function mixByte(checksum: bigint, byte: number) {
+  return ((checksum ^ BigInt(byte)) * checksumPrime) & checksumMask;
 }
 
 function parseChecksum(value: number | string) {
@@ -1132,7 +1321,7 @@ async function run(command: Command): Promise<string> {
     const child = spawn(command.cmd, command.args, {
       cwd: command.cwd ?? root,
       stdio: ["ignore", "pipe", "pipe"],
-      env: process.env,
+      env: { ...process.env, ...command.env },
     });
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];

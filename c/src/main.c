@@ -1,3 +1,7 @@
+#if !defined(_WIN32)
+#define _POSIX_C_SOURCE 200809L
+#endif
+
 #include "wordfreq.h"
 
 #include <errno.h>
@@ -7,6 +11,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#if defined(_WIN32)
+#include <windows.h>
+#endif
+
+static const uint32_t CHECKSUM_OFFSET = UINT32_C(2166136261);
+static const uint32_t CHECKSUM_PRIME = UINT32_C(16777619);
 
 typedef struct {
     const char *path;
@@ -191,19 +201,57 @@ static void print_table(const WfResult *result, size_t top)
 
 static double now_ms(void)
 {
+#if defined(_WIN32)
+    LARGE_INTEGER frequency;
+    LARGE_INTEGER counter;
+    (void)QueryPerformanceFrequency(&frequency);
+    (void)QueryPerformanceCounter(&counter);
+    return (double)counter.QuadPart * 1000.0 / (double)frequency.QuadPart;
+#else
     struct timespec time;
-    (void)timespec_get(&time, TIME_UTC);
+    (void)clock_gettime(CLOCK_MONOTONIC, &time);
     return (double)time.tv_sec * 1000.0 + (double)time.tv_nsec / 1000000.0;
+#endif
 }
 
-static uint64_t checksum_result(const WfResult *result, size_t top)
+static uint32_t mix_byte(uint32_t checksum, unsigned char byte)
+{
+    return (checksum ^ (uint32_t)byte) * CHECKSUM_PRIME;
+}
+
+static uint32_t mix_u32(uint32_t checksum, uint32_t value)
+{
+    for (size_t i = 0; i < 4u; i++) {
+        checksum = mix_byte(checksum, (unsigned char)(value & UINT32_C(0xff)));
+        value >>= 8u;
+    }
+    return checksum;
+}
+
+static uint32_t mix_u64(uint32_t checksum, uint64_t value)
+{
+    for (size_t i = 0; i < 8u; i++) {
+        checksum = mix_byte(checksum, (unsigned char)(value & UINT64_C(0xff)));
+        value >>= 8u;
+    }
+    return checksum;
+}
+
+static uint32_t checksum_result(const WfResult *result, size_t top)
 {
     size_t limit = result->unique < top ? result->unique : top;
-    uint64_t checksum = result->total ^ (uint64_t)result->unique;
+    uint32_t checksum = CHECKSUM_OFFSET;
+
+    checksum = mix_u64(checksum, result->total);
+    checksum = mix_u64(checksum, (uint64_t)result->unique);
 
     for (size_t i = 0; i < limit; i++) {
-        checksum ^= result->entries[i].count ^
-                    (uint64_t)strlen(result->entries[i].word);
+        const unsigned char *word =
+                (const unsigned char *)result->entries[i].word;
+        for (size_t index = 0; word[index] != '\0'; index++) {
+            checksum = mix_byte(checksum, word[index]);
+        }
+        checksum = mix_u64(checksum, result->entries[i].count);
     }
 
     return checksum;
@@ -212,29 +260,28 @@ static uint64_t checksum_result(const WfResult *result, size_t top)
 static int
 print_bench(const unsigned char *data, size_t len, const Options *options)
 {
-    uint64_t checksum = 0u;
-
     for (size_t i = 0; i < options->bench_warmups; i++) {
         WfResult result = { 0 };
         if (wf_count_bytes(data, len, options->max_word, &result) != 0) {
             return -1;
         }
-        checksum ^= checksum_result(&result, options->top);
+        (void)checksum_result(&result, options->top);
         wf_result_free(&result);
     }
 
+    uint32_t checksum = CHECKSUM_OFFSET;
     double started = now_ms();
     for (size_t i = 0; i < options->bench_runs; i++) {
         WfResult result = { 0 };
         if (wf_count_bytes(data, len, options->max_word, &result) != 0) {
             return -1;
         }
-        checksum ^= checksum_result(&result, options->top);
+        checksum = mix_u32(checksum, checksum_result(&result, options->top));
         wf_result_free(&result);
     }
     double mean_ms = (now_ms() - started) / (double)options->bench_runs;
 
-    printf("{\"mean_ms\":%.6f,\"checksum\":%" PRIu64 "}\n", mean_ms, checksum);
+    printf("{\"mean_ms\":%.6f,\"checksum\":%" PRIu32 "}\n", mean_ms, checksum);
     return 0;
 }
 

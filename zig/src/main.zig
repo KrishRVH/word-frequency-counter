@@ -5,6 +5,8 @@ const default_max_word: usize = 64;
 const estimated_bytes_per_unique_word: usize = 32;
 const max_word_limit: usize = 1024;
 const min_word: usize = 4;
+const checksum_offset: u32 = 2166136261;
+const checksum_prime: u32 = 16777619;
 
 const Entry = struct {
     word: []const u8,
@@ -191,16 +193,45 @@ fn countChecksum(
     bytes: []const u8,
     top: usize,
     max_word: usize,
-) !u64 {
+) !u32 {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
     const result = try countBytes(arena.allocator(), bytes, top, max_word);
-    var value = result.total ^ @as(u64, @intCast(result.unique));
+    var value = checksum_offset;
+    value = mixU64(value, result.total);
+    value = mixU64(value, @intCast(result.unique));
     for (result.top) |entry| {
-        value ^= entry.count ^ @as(u64, @intCast(entry.word.len));
+        for (entry.word) |byte| {
+            value = mixByte(value, byte);
+        }
+        value = mixU64(value, entry.count);
     }
     return value;
+}
+
+fn mixByte(checksum: u32, value: u8) u32 {
+    return (checksum ^ @as(u32, value)) *% checksum_prime;
+}
+
+fn mixU32(checksum: u32, value: u32) u32 {
+    var mixed = checksum;
+    var remaining = value;
+    for (0..4) |_| {
+        mixed = mixByte(mixed, @intCast(remaining & 0xff));
+        remaining >>= 8;
+    }
+    return mixed;
+}
+
+fn mixU64(checksum: u32, value: u64) u32 {
+    var mixed = checksum;
+    var remaining = value;
+    for (0..8) |_| {
+        mixed = mixByte(mixed, @intCast(remaining & 0xff));
+        remaining >>= 8;
+    }
+    return mixed;
 }
 
 fn renderBench(
@@ -214,10 +245,10 @@ fn renderBench(
         _ = try countChecksum(allocator, bytes, options.top, options.max_word);
     }
 
-    var checksum: u64 = 0;
+    var checksum = checksum_offset;
     const started = Io.Clock.awake.now(io).nanoseconds;
     for (0..options.bench_runs) |_| {
-        checksum ^= try countChecksum(allocator, bytes, options.top, options.max_word);
+        checksum = mixU32(checksum, try countChecksum(allocator, bytes, options.top, options.max_word));
     }
     const elapsed = Io.Clock.awake.now(io).nanoseconds - started;
     const mean_ms = @as(f64, @floatFromInt(elapsed)) / 1_000_000.0 / @as(f64, @floatFromInt(options.bench_runs));
