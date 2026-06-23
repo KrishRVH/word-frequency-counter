@@ -60,11 +60,7 @@ bun.lockb
 vendor/
 .phpunit.cache/
 .phpstan.cache/
-.psalm-cache/
-.rector-cache/
-.deptrac.cache
 .php-cs-fixer.cache
-.pdepend/
 
 # .NET
 .vs/

@@ -1,6 +1,6 @@
 # Word Frequency Counter
 
-One ASCII word-frequency problem implemented across twelve languages. The point
+One ASCII word-frequency problem implemented across thirteen languages. The point
 is not to chase every last cycle; it is to compare small, idiomatic,
 well-policed implementations that all obey the same byte-level contract.
 
@@ -73,10 +73,10 @@ is:
 6. Truncate only after sorting.
 
 Rust, C++, and Zig use their standard hash maps with normal per-map default
-hashers. C is the one native exception: ISO C has no standard hash map, so it
-may keep a small self-contained table, but that table is treated as C's local
-stand-in for the standard maps rather than a license for specialized benchmark
-machinery.
+hashers. C and Fortran are the native exceptions: neither language has a
+standard hash map, so each may keep a small self-contained table, but those
+tables are treated as local stand-ins for the standard maps rather than a
+license for specialized benchmark machinery.
 
 Modest capacity hints are allowed when they are shared and input-derived:
 implementations with standard capacity APIs may estimate unique words from input
@@ -120,13 +120,14 @@ cross-language wall-time comparison.
 | Rust 2024  | library plus CLI                       | Ownership-conscious core over `&[u8]`, ordinary `HashMap`, borrowed `Cow<[u8]>` keys for already-lowercase words, byte-backed result entries, and explicit render functions. The `case-fold-mix` fixture keeps that representation advantage visible. |
 | Go         | `internal/wordcount` plus command      | Reads bytes with `io.ReadAll`, scans directly, and keeps the package boundary natural Go. The code stays deliberately boring.                                                                                                                         |
 | JavaScript | ESM CLI with `checkJs`                 | Uses `Uint8Array`, `Map`, and explicit ASCII helpers. The implementation is readable, with string accumulation still visible once startup is removed from the benchmark.                                                                              |
-| PHP        | Composer package plus thin bin wrapper | The most standards-heavy dynamic implementation: strict types, value objects, PHPCS, PHPMD, PHPStan, Psalm, Deptrac, and Rector dry-run. The code is more formal because the quality gate is more formal.                                             |
+| PHP        | Composer package plus thin bin wrapper | Strict types, PHPCS, and PHPStan strict rules without architecture or refactor tooling. The code stays more formal than the smaller dynamic implementations, but the gate is now sized to this benchmark.                                             |
 | C#         | .NET console app                       | Reads bytes with `File.ReadAllBytes`, carries scanner state in an accumulator, and benchmarks the built Release app directly.                                                                                                                         |
 | Lua        | module plus executable script          | Compact table-based scanner with a small CLI wrapper. It is a good example of Lua being direct without pretending to be a static language.                                                                                                            |
 | Kotlin     | Gradle JVM app                         | Uses a byte array, `StringBuilder`, unsigned counts, and locked Gradle tooling. The warm-task columns compare scanner work, while the adjusted CLI column keeps JVM startup cost visible.                                                             |
 | Elixir     | Mix escript                            | Builds a prod escript and expresses the scanner as a reducer over bytes with immutable maps. It is elegant BEAM code for the problem, not a claim that BEAM is ideal for tiny byte-counting CLIs.                                                     |
 | Zig        | single native CLI                      | Explicit allocator ownership, scoped arena lifetime, `StringHashMap`, and low ceremony. It makes the byte-level mechanics visible without C's manual cleanup surface.                                                                                 |
 | Haskell    | GHC-built CLI                          | Strict `ByteString` fold into `Data.Map.Strict`, with pure parse/render/counting pieces. `Map` is a deliberate standard-library caveat rather than an extra dependency for a hash table.                                                              |
+| Fortran    | single native CLI                      | Modern free-form Fortran with `iso_fortran_env`, stream byte reads, explicit modules, a local open-addressed table, and standard command-line/time intrinsics.                                                                                        |
 
 ## Benchmark Corpus
 
@@ -156,18 +157,19 @@ mise run bench -- --runs=2 --warmups=1 --warm-task-samples=1 --warm-task-runs=10
 
 | implementation | tiny-mix warm ms | small-mix warm ms | medium-mix warm ms | unique-sort warm ms | case-fold-mix warm ms | medium-mix MB/s | medium-mix adjusted CLI ms |
 | -------------- | ---------------: | ----------------: | -----------------: | ------------------: | --------------------: | --------------: | -------------------------: |
-| rust           |            0.012 |             0.209 |              1.841 |               1.711 |                 1.876 |           271.6 |                      2.320 |
-| zig            |            0.009 |             0.268 |              2.687 |               3.742 |                 2.315 |           186.1 |                      3.164 |
-| cpp            |            0.014 |             0.303 |              2.822 |               4.354 |                 2.386 |           177.2 |                      3.635 |
-| c              |            0.014 |             0.302 |              3.005 |               4.617 |                 2.500 |           166.4 |                      4.066 |
-| go             |            0.026 |             0.499 |              4.545 |               5.107 |                 3.797 |           110.0 |                      5.583 |
-| kotlin         |            0.503 |             1.562 |              5.743 |               6.362 |                 4.988 |            87.1 |                     41.964 |
-| csharp         |            0.085 |             1.330 |              8.021 |               7.346 |                 6.245 |            62.3 |                     16.492 |
-| haskell        |            0.123 |             0.911 |              9.370 |              10.167 |                10.311 |            53.4 |                     12.862 |
-| javascript     |            0.177 |             1.528 |             12.045 |              13.140 |                10.459 |            41.5 |                     22.311 |
-| php            |            0.256 |             4.448 |             37.603 |              43.949 |                35.608 |            13.3 |                     38.575 |
-| lua            |            0.653 |             7.976 |             63.833 |              73.355 |                61.420 |             7.8 |                     67.433 |
-| elixir         |            0.176 |             2.701 |             71.602 |              68.709 |                60.818 |             7.0 |                     60.644 |
+| rust           |            0.012 |             0.202 |              1.806 |               1.715 |                 1.873 |           276.9 |                      2.549 |
+| zig            |            0.009 |             0.285 |              2.699 |               3.742 |                 2.284 |           185.3 |                      2.419 |
+| cpp            |            0.014 |             0.304 |              2.764 |               4.383 |                 2.342 |           180.9 |                      3.696 |
+| c              |            0.014 |             0.314 |              3.017 |               4.719 |                 2.567 |           165.7 |                      4.076 |
+| go             |            0.027 |             0.586 |              4.470 |               4.937 |                 3.685 |           111.9 |                      5.037 |
+| fortran        |            0.026 |             0.505 |              4.605 |               9.431 |                 4.931 |           108.6 |                      6.120 |
+| kotlin         |            0.466 |             1.411 |              5.233 |               6.605 |                 5.024 |            95.6 |                     41.621 |
+| csharp         |            0.083 |             1.258 |              7.850 |               7.115 |                 6.211 |            63.7 |                     17.779 |
+| haskell        |            0.128 |             0.902 |              9.372 |              10.200 |                10.211 |            53.4 |                     12.987 |
+| javascript     |            0.179 |             1.466 |             11.984 |              13.111 |                10.457 |            41.7 |                     21.475 |
+| php            |            0.245 |             4.299 |             36.143 |              44.553 |                34.775 |            13.8 |                     37.666 |
+| lua            |            0.692 |             7.718 |             63.308 |              65.188 |                60.806 |             7.9 |                     67.058 |
+| elixir         |            0.168 |             2.707 |             72.386 |              68.764 |                60.117 |             6.9 |                     63.842 |
 
 Interpret the `warm ms` columns as the closest benchmark here to an
 already-running service or application doing this task in the middle of a larger
@@ -235,12 +237,13 @@ The repository is strict by design:
 | Rust       | `cargo fmt`, Clippy with warnings denied                                                  |
 | Go         | `gofumpt`, `go vet`, `golangci-lint`, `govulncheck`                                       |
 | JavaScript | Prettier, ESLint, TypeScript `checkJs`, Node syntax check                                 |
-| PHP        | Composer Normalize, PHPCS, PHPMD, PHPStan, Psalm, Deptrac, Rector dry-run                 |
+| PHP        | Composer Normalize, PHPCS, PHPStan strict rules                                           |
 | C#         | `dotnet format`, warnings as errors                                                       |
 | Lua        | StyLua, Luacheck, Lua Language Server diagnostics                                         |
 | Kotlin     | ktlint, Detekt, Gradle dependency locking and verification metadata                       |
 | Elixir     | `mix format`, Credo strict mode, warnings as errors                                       |
 | Haskell    | Ormolu, HLint, GHC `-Wall -Werror`, Cabal check/build                                     |
+| Fortran    | Findent, GNU Fortran `-std=f2018`, warnings as errors                                     |
 | Zig        | `zig fmt`, compile check                                                                  |
 | Benchmark  | Bun/TypeScript runner validates every implementation against the oracle                   |
 
@@ -259,6 +262,7 @@ kotlin/       Gradle JVM app
 elixir/       Mix escript
 zig/          Zig CLI
 haskell/      GHC/Cabal app
+fortran/      GNU Fortran CLI
 scripts/      Bun benchmark and oracle-validation runner
 fixtures/     small checked-in fixture
 ```

@@ -42,6 +42,8 @@
 *.zig text
 *.hs text
 *.cabal text
+*.f90 text
+*.F90 text
 *.kt text
 *.kts text
 *.ex text
@@ -96,9 +98,9 @@ Makefile text
 
 # GitHub Linguist
 #
-# Keep the language bar focused on the benchmark implementations. Root plumbing
-# is excluded, generated and vendored mass stays hidden, and language-scoped
-# manifests count toward their implementation instead of falling into "Other".
+# Keep the language bar focused on benchmark implementations. Root plumbing is
+# excluded, generated and vendored mass stays hidden, and small language-scoped
+# manifests count only when they clarify an implementation instead of padding it.
 *.md linguist-documentation=true
 LICENSE linguist-documentation=true
 AGENTS.md linguist-documentation=true
@@ -152,13 +154,9 @@ rust/rustfmt.toml linguist-language=Rust
 javascript/package.json linguist-language=JavaScript
 javascript/eslint.config.mjs linguist-language=JavaScript
 javascript/tsconfig.json linguist-language=JavaScript
-php/composer.json linguist-language=PHP
-php/deptrac.yaml linguist-language=PHP
-php/phpcs.xml linguist-language=PHP
-php/phpmd.xml linguist-language=PHP
-php/phpstan.neon linguist-language=PHP
-php/psalm.xml linguist-language=PHP
-php/rector.php linguist-language=PHP
+php/composer.json linguist-detectable=false
+php/phpcs.xml linguist-detectable=false
+php/phpstan.neon linguist-detectable=false
 php/bin/wordcount linguist-language=PHP
 csharp/**/*.csproj linguist-language=C#
 lua/stylua.toml linguist-language=Lua
@@ -166,6 +164,8 @@ lua/bin/wordcount.lua linguist-language=Lua
 elixir/.formatter.exs linguist-language=Elixir
 elixir/mix.exs linguist-language=Elixir
 haskell/*.cabal linguist-language=Haskell
+fortran/**/*.f90 linguist-language=Fortran
+fortran/**/*.F90 linguist-language=Fortran
 kotlin/**/*.kts linguist-language=Kotlin
 
 # Binary assets/artifacts

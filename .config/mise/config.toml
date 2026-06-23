@@ -39,6 +39,8 @@ taplo = "0.10.0"
 zig = "0.16.0"
 "github:composer/composer" = "2.10.1"
 "go:golang.org/x/vuln/cmd/govulncheck" = "1.4.0"
+"conda:findent" = "4.3.7"
+"conda:gfortran" = "15.2.0"
 "conda:clangxx" = "22.1.8"
 "conda:clang-tools" = "22.1.8"
 
@@ -66,6 +68,9 @@ dotnet format csharp/src/WordFrequencyCounter/WordFrequencyCounter.csproj
 ktlint -F 'kotlin/**/*.kt' 'kotlin/**/*.kts'
 (cd elixir && mix format)
 ormolu --mode inplace haskell/app/Main.hs
+mkdir -p build/check
+findent -i3 -Rr < fortran/src/main.f90 > build/check/main.f90
+mv build/check/main.f90 fortran/src/main.f90
 zig fmt zig/src/*.zig
 taplo format .config/mise/config.toml
 """
@@ -86,6 +91,9 @@ dotnet format csharp/src/WordFrequencyCounter/WordFrequencyCounter.csproj --veri
 ktlint 'kotlin/**/*.kt' 'kotlin/**/*.kts'
 (cd elixir && mix format --check-formatted)
 ormolu --mode check haskell/app/Main.hs
+mkdir -p build/check
+findent -i3 -Rr < fortran/src/main.f90 > build/check/main.f90
+cmp -s fortran/src/main.f90 build/check/main.f90
 zig fmt --check zig/src/*.zig
 taplo format --check .config/mise/config.toml
 """
@@ -116,6 +124,8 @@ lua-language-server --check=lua --checklevel=Error
 hlint haskell/app
 ghcup run --install --ghc 9.14.1 -- ghc -Wall -Werror -fno-code haskell/app/Main.hs
 (cd haskell && cabal check && ghcup run --install --ghc 9.14.1 -- cabal build all --ghc-options=-Werror)
+mkdir -p build/check/fortran
+gfortran -std=f2018 -Wall -Wextra -Wimplicit-interface -Wimplicit-procedure -Wsurprising -Werror -pedantic -fsyntax-only -J build/check/fortran fortran/src/main.f90
 zig build-exe -fno-emit-bin zig/src/main.zig
 bun build scripts/bench.ts --target=bun --outfile=build/check/bench.js
 """
@@ -142,4 +152,4 @@ depends = ["check:local"]
 
 [tasks.clean]
 description = "Remove generated build output"
-run = "rm -rf build rust/target go/bin javascript/node_modules javascript/.tsbuildinfo php/vendor php/.psalm-cache php/.rector-cache php/.phpstan.cache php/.pdepend php/.deptrac.cache csharp/src/WordFrequencyCounter/bin csharp/src/WordFrequencyCounter/obj kotlin/.gradle kotlin/.kotlin kotlin/build elixir/_build elixir/deps elixir/word_count haskell/dist-newstyle .lua_modules .lua_modules54 .zig-cache zig-out"
+run = "rm -rf build rust/target go/bin javascript/node_modules javascript/.tsbuildinfo php/vendor php/.phpstan.cache csharp/src/WordFrequencyCounter/bin csharp/src/WordFrequencyCounter/obj kotlin/.gradle kotlin/.kotlin kotlin/build elixir/_build elixir/deps elixir/word_count haskell/dist-newstyle .lua_modules .lua_modules54 .zig-cache zig-out"

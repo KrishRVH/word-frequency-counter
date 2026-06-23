@@ -30,10 +30,7 @@ final class WordCounter
     {
         $maxWord = $this->normalizeMaxWord($maxWord);
 
-        /**
-         * @phpstan-var array<array-key, int> $counts
-         * @psalm-var array<string, int> $counts
-         */
+        /** @phpstan-var array<array-key, int> $counts */
         $counts = [];
         $word = '';
         $total = 0;

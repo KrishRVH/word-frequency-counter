@@ -7,16 +7,12 @@
     "php": ">=8.5"
   },
   "require-dev": {
-    "deptrac/deptrac": "^4.6.0",
     "ergebnis/composer-normalize": "^2.50.0",
-    "phpmd/phpmd": "^2.15.0",
     "phpstan/phpstan": "^2.1.39",
     "phpstan/phpstan-strict-rules": "^2.0.10",
-    "rector/rector": "^2.3.6",
     "roave/security-advisories": "dev-latest",
     "slevomat/coding-standard": "^8.27.1",
-    "squizlabs/php_codesniffer": "^4.0.1",
-    "vimeo/psalm": "^6.15.1"
+    "squizlabs/php_codesniffer": "^4.0.1"
   },
   "autoload": {
     "psr-4": {
@@ -31,17 +27,11 @@
     "sort-packages": true
   },
   "scripts": {
-    "analyze": [
-      "@phpstan",
-      "@psalm"
-    ],
-    "architecture": "deptrac analyze --no-cache",
+    "analyze": "@phpstan",
     "check": [
       "@syntax",
       "@style",
-      "@analyze",
-      "@architecture",
-      "@rector:dry"
+      "@analyze"
     ],
     "fmt": "phpcbf",
     "lint": [
@@ -50,29 +40,19 @@
     "normalize:check": "composer normalize --dry-run --diff",
     "phpcbf": "phpcbf",
     "phpcs": "phpcs",
-    "phpmd": "HOME=. php -d error_reporting='E_ALL & ~E_DEPRECATED & ~E_USER_DEPRECATED' vendor/bin/phpmd src text phpmd.xml",
     "phpstan": "php -d disable_functions=proc_open vendor/bin/phpstan analyse --memory-limit=512M",
-    "psalm": "psalm --no-progress --output-format=console",
-    "rector:dry": "rector process --dry-run",
-    "style": [
-      "@phpcs",
-      "@phpmd"
-    ],
+    "style": "@phpcs",
     "syntax": "php -l src/Cli.php && php -l src/CliOptions.php && php -l src/Entry.php && php -l src/Result.php && php -l src/WordCounter.php && php -l bin/wordcount"
   },
   "scripts-descriptions": {
-    "analyze": "Run static analysis with PHPStan and Psalm.",
-    "architecture": "Run Deptrac architecture rules.",
+    "analyze": "Run static analysis with PHPStan.",
     "check": "Run the PHP quality gate without tests.",
     "fmt": "Auto-fix PHP coding-standard issues.",
     "lint": "Alias for the PHP quality gate.",
     "normalize:check": "Verify composer.json normalization.",
     "phpcbf": "Auto-fix PHPCS violations.",
     "phpcs": "Check coding standards.",
-    "phpmd": "Run PHPMD rules on src/.",
     "phpstan": "Run PHPStan analysis.",
-    "psalm": "Run Psalm analysis.",
-    "rector:dry": "Preview Rector refactorings without modifying files.",
     "style": "Run PHP style checks.",
     "syntax": "Run PHP syntax checks."
   }

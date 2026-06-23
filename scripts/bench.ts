@@ -99,6 +99,7 @@ const validationFixtures = join(root, "build", "fixtures");
 const legacyBenchmarkFixture = join(validationFixtures, "benchmark.txt");
 const startupFixture = join(validationFixtures, "startup-empty.txt");
 const haskellBuild = join(root, "build", "haskell");
+const fortranBuild = join(root, "build", "fortran");
 const tokenfreqRoot = join(homedir(), "dev/personal/tokenfreq-c99");
 const defaultOracle = join(tokenfreqRoot, "build/clang/wc");
 const benchmarkWords = [
@@ -466,12 +467,48 @@ const implementations: Implementation[] = [
       ],
     }),
   },
+  {
+    name: "fortran",
+    build: [
+      {
+        cmd: "gfortran",
+        args: [
+          "-std=f2018",
+          "-O2",
+          "-Wall",
+          "-Wextra",
+          "-Wimplicit-interface",
+          "-Wimplicit-procedure",
+          "-Wsurprising",
+          "-Werror",
+          "-pedantic",
+          "-J",
+          fortranBuild,
+          "-o",
+          join(buildBin, "wordcount_fortran"),
+          "fortran/src/main.f90",
+        ],
+      },
+    ],
+    run: (fixture, top, maxWord) => ({
+      cmd: join(buildBin, "wordcount_fortran"),
+      args: [
+        "--json",
+        "--top",
+        String(top),
+        "--max-word",
+        String(maxWord),
+        fixture,
+      ],
+    }),
+  },
 ];
 
 const options = parseArgs(process.argv.slice(2));
 mkdirSync(buildBin, { recursive: true });
 mkdirSync(validationFixtures, { recursive: true });
 mkdirSync(haskellBuild, { recursive: true });
+mkdirSync(fortranBuild, { recursive: true });
 const benchmarkFixtures = createBenchmarkFixtures(options);
 writeFileSync(startupFixture, "");
 
