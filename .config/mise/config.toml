@@ -37,6 +37,7 @@ rust = "1.96.0"
 stylua = "2.5.2"
 taplo = "0.10.0"
 zig = "0.16.0"
+"github:alire-project/alire" = { version = "2.1.1", exe = "alr" }
 "github:composer/composer" = "2.10.1"
 "go:golang.org/x/vuln/cmd/govulncheck" = "1.4.0"
 "conda:findent" = "4.3.7"
@@ -71,6 +72,7 @@ ormolu --mode inplace haskell/app/Main.hs
 mkdir -p build/check
 findent -i3 -Rr < fortran/src/main.f90 > build/check/main.f90
 mv build/check/main.f90 fortran/src/main.f90
+(cd spark && alr -n exec -- gnatformat -P word_frequency_counter_spark.gpr -U --charset=utf-8 --width=79 --indentation=3)
 zig fmt zig/src/*.zig
 taplo format .config/mise/config.toml
 """
@@ -94,6 +96,7 @@ ormolu --mode check haskell/app/Main.hs
 mkdir -p build/check
 findent -i3 -Rr < fortran/src/main.f90 > build/check/main.f90
 cmp -s fortran/src/main.f90 build/check/main.f90
+(cd spark && alr -n exec -- gnatformat --check -P word_frequency_counter_spark.gpr -U --charset=utf-8 --width=79 --indentation=3)
 zig fmt --check zig/src/*.zig
 taplo format --check .config/mise/config.toml
 """
@@ -126,6 +129,23 @@ ghcup run --install --ghc 9.14.1 -- ghc -Wall -Werror -fno-code haskell/app/Main
 (cd haskell && cabal check && ghcup run --install --ghc 9.14.1 -- cabal build all --ghc-options=-Werror)
 mkdir -p build/check/fortran
 gfortran -std=f2018 -Wall -Wextra -Wimplicit-interface -Wimplicit-procedure -Wsurprising -Werror -pedantic -fsyntax-only -J build/check/fortran fortran/src/main.f90
+(cd spark && test -f alire.toml && test -f word_frequency_counter_spark.gpr && test -f gnat.adc)
+(cd spark && awk '
+  /^\\[\\[depends-on\\]\\]/ { in_deps = 1; next }
+  /^\\[/ { in_deps = 0 }
+  in_deps && /^[[:space:]]*[[:alnum:]_][[:alnum:]_-]*[[:space:]]*=/ {
+    value = substr($0, index($0, "=") + 1)
+    gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+    if (value !~ /^"=[0-9][^"]*"$/) {
+      print FILENAME ":" FNR ": dependency must use an exact =x.y.z constraint: " $0
+      bad = 1
+    }
+  }
+  END { exit bad }
+' alire.toml)
+(cd spark && ! find src -type f \\( -name '*.ads' -o -name '*.adb' \\) -print0 | xargs -0 grep -L 'SPARK_Mode' 2>/dev/null | grep -q .)
+(cd spark && alr -n build --validation)
+(cd spark && alr -n exec -- gnatprove -P word_frequency_counter_spark.gpr -U --mode=all --level=4 --warnings=error --checks-as-errors=on --pedantic --report=fail --output=oneline -j0)
 zig build-exe -fno-emit-bin zig/src/main.zig
 bun build scripts/bench.ts --target=bun --outfile=build/check/bench.js
 """
@@ -152,4 +172,4 @@ depends = ["check:local"]
 
 [tasks.clean]
 description = "Remove generated build output"
-run = "rm -rf build rust/target go/bin javascript/node_modules javascript/.tsbuildinfo php/vendor php/.phpstan.cache csharp/src/WordFrequencyCounter/bin csharp/src/WordFrequencyCounter/obj kotlin/.gradle kotlin/.kotlin kotlin/build elixir/_build elixir/deps elixir/word_count haskell/dist-newstyle .lua_modules .lua_modules54 .zig-cache zig-out"
+run = "rm -rf build rust/target go/bin javascript/node_modules javascript/.tsbuildinfo php/vendor php/.phpstan.cache csharp/src/WordFrequencyCounter/bin csharp/src/WordFrequencyCounter/obj kotlin/.gradle kotlin/.kotlin kotlin/build elixir/_build elixir/deps elixir/word_count haskell/dist-newstyle spark/config spark/alire/build_hash_inputs spark/alire/flags spark/alire/settings.toml .lua_modules .lua_modules54 .zig-cache zig-out"

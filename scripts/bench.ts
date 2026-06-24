@@ -502,6 +502,36 @@ const implementations: Implementation[] = [
       ],
     }),
   },
+  {
+    name: "spark",
+    build: [
+      {
+        cwd: join(root, "spark"),
+        cmd: "alr",
+        args: [
+          "-n",
+          "exec",
+          "--",
+          "gprbuild",
+          "-P",
+          "word_frequency_counter_spark.gpr",
+          "-p",
+          "-XBUILD_MODE=release",
+        ],
+      },
+    ],
+    run: (fixture, top, maxWord) => ({
+      cmd: join(buildBin, "wordcount_spark"),
+      args: [
+        "--json",
+        "--top",
+        String(top),
+        "--max-word",
+        String(maxWord),
+        fixture,
+      ],
+    }),
+  },
 ];
 
 const options = parseArgs(process.argv.slice(2));

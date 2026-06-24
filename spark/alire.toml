@@ -1,0 +1,20 @@
+name = "word_frequency_counter_spark"
+description = "SPARK/Ada word-frequency benchmark implementation."
+version = "0.1.0-dev"
+licenses = "MIT"
+authors = ["Project Maintainers"]
+maintainers = ["Project Maintainers <maintainers@example.com>"]
+tags = ["ada", "spark", "benchmark"]
+project-files = ["word_frequency_counter_spark.gpr"]
+
+[[depends-on]]
+gnat_native = "=15.2.1"
+
+[[depends-on]]
+gprbuild = "=26.0.1"
+
+[[depends-on]]
+gnatprove = "=15.1.0"
+
+[[depends-on]]
+gnatformat_bin = "=26.0.0"

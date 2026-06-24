@@ -100,6 +100,12 @@ elixir/word_count
 zig-cache/
 zig-out/
 
+# SPARK / Alire
+spark/alire/build_hash_inputs
+spark/alire/flags/
+spark/alire/settings.toml
+spark/config/
+
 # Lua
 .lua_modules/
 .lua_modules54/

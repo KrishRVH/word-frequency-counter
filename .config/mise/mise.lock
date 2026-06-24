@@ -1322,6 +1322,33 @@ url = "https://downloads.haskell.org/~ghcup/0.2.6.2/x86_64-linux-ghcup-0.2.6.2"
 [tools.ghcup."platforms.linux-x64-musl-baseline"]
 url = "https://downloads.haskell.org/~ghcup/0.2.6.2/x86_64-linux-ghcup-0.2.6.2"
 
+[[tools."github:alire-project/alire"]]
+version = "2.1.1"
+backend = "github:alire-project/alire"
+
+[tools."github:alire-project/alire"."platforms.linux-x64"]
+checksum = "sha256:09c66bcd8c35dd4b97b72c3d9b76e44caa6964a2db35aba069f396f00f1f64c7"
+url = "https://github.com/alire-project/alire/releases/download/v2.1.1/alr-2.1.1-bin-x86_64-linux.zip"
+url_api = "https://api.github.com/repos/alire-project/alire/releases/assets/429362820"
+
+[tools."github:alire-project/alire"."platforms.linux-x64-baseline"]
+checksum = "sha256:09c66bcd8c35dd4b97b72c3d9b76e44caa6964a2db35aba069f396f00f1f64c7"
+url = "https://github.com/alire-project/alire/releases/download/v2.1.1/alr-2.1.1-bin-x86_64-linux.zip"
+url_api = "https://api.github.com/repos/alire-project/alire/releases/assets/429362820"
+provenance = "github-attestations"
+
+[tools."github:alire-project/alire"."platforms.linux-x64-musl"]
+checksum = "sha256:09c66bcd8c35dd4b97b72c3d9b76e44caa6964a2db35aba069f396f00f1f64c7"
+url = "https://github.com/alire-project/alire/releases/download/v2.1.1/alr-2.1.1-bin-x86_64-linux.zip"
+url_api = "https://api.github.com/repos/alire-project/alire/releases/assets/429362820"
+provenance = "github-attestations"
+
+[tools."github:alire-project/alire"."platforms.linux-x64-musl-baseline"]
+checksum = "sha256:09c66bcd8c35dd4b97b72c3d9b76e44caa6964a2db35aba069f396f00f1f64c7"
+url = "https://github.com/alire-project/alire/releases/download/v2.1.1/alr-2.1.1-bin-x86_64-linux.zip"
+url_api = "https://api.github.com/repos/alire-project/alire/releases/assets/429362820"
+provenance = "github-attestations"
+
 [[tools."github:composer/composer"]]
 version = "2.10.1"
 backend = "github:composer/composer"

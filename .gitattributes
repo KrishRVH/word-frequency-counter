@@ -48,6 +48,10 @@
 *.kts text
 *.ex text
 *.exs text
+*.adb text
+*.ads text
+*.gpr text
+*.adc text
 
 # Build/config
 *.cmake text
@@ -167,6 +171,11 @@ haskell/*.cabal linguist-language=Haskell
 fortran/**/*.f90 linguist-language=Fortran
 fortran/**/*.F90 linguist-language=Fortran
 kotlin/**/*.kts linguist-language=Kotlin
+spark/**/*.adb linguist-language=Ada
+spark/**/*.ads linguist-language=Ada
+spark/**/*.gpr linguist-language=Ada
+spark/gnat.adc linguist-language=Ada
+spark/alire.toml linguist-language=Ada
 
 # Binary assets/artifacts
 *.7z binary
