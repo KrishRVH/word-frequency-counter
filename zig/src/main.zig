@@ -1,6 +1,10 @@
+//! Case-insensitive ASCII word frequencies.
+
 const std = @import("std");
 const Io = std.Io;
+const Allocator = std.mem.Allocator;
 
+const usage = "usage: wordcount_zig [--json] [--top N] [--max-word N] <file>";
 const default_max_word: usize = 64;
 const estimated_bytes_per_unique_word: usize = 32;
 const max_word_limit: usize = 1024;
@@ -11,68 +15,68 @@ const checksum_prime: u32 = 16777619;
 const Entry = struct {
     word: []const u8,
     count: u64,
+
+    fn lessThan(_: void, a: Entry, b: Entry) bool {
+        if (a.count != b.count) return a.count > b.count;
+        return std.mem.lessThan(u8, a.word, b.word);
+    }
 };
 
 const Result = struct {
     total: u64,
     unique: usize,
-    top: []Entry,
+    top: []const Entry,
 };
 
 const Options = struct {
-    path: []const u8,
+    path: []const u8 = "",
     top: usize = 10,
-    max_word: usize = 1024,
+    max_word: usize = max_word_limit,
     bench_runs: usize = 0,
     bench_warmups: usize = 0,
     json: bool = false,
 };
 
 pub fn main(init: std.process.Init) !void {
-    const allocator = init.gpa;
-    const process_arena = init.arena.allocator();
+    const gpa = init.gpa;
     const io = init.io;
-    const args = try init.minimal.args.toSlice(process_arena);
-
+    const args = try init.minimal.args.toSlice(init.arena.allocator());
     const options = parseArgs(args[1..]) catch {
-        var stderr_buffer: [256]u8 = undefined;
-        var stderr_writer = Io.File.stderr().writer(io, &stderr_buffer);
+        var buffer: [256]u8 = undefined;
+        var stderr_writer = Io.File.stderr().writer(io, &buffer);
         const stderr = &stderr_writer.interface;
-        try stderr.writeAll(
-            "usage: wordcount_zig [--json] [--top N] [--max-word N] <file>\n",
-        );
+        try stderr.print("{s}\n", .{usage});
         try stderr.flush();
         std.process.exit(2);
     };
 
-    const bytes = try Io.Dir.cwd().readFileAlloc(io, options.path, allocator, .unlimited);
-    defer allocator.free(bytes);
+    const bytes = Io.Dir.cwd().readFileAlloc(io, options.path, gpa, .unlimited) catch |err|
+        std.process.fatal("{s}: {t}", .{ options.path, err });
+    defer gpa.free(bytes);
 
-    var stdout_buffer: [4096]u8 = undefined;
-    var stdout_writer = Io.File.stdout().writer(io, &stdout_buffer);
+    var buffer: [4096]u8 = undefined;
+    var stdout_writer = Io.File.stdout().writer(io, &buffer);
     const stdout = &stdout_writer.interface;
 
     if (options.bench_runs > 0) {
-        try renderBench(stdout, io, allocator, bytes, options);
-        try stdout.flush();
-        return;
-    }
-
-    var arena = std.heap.ArenaAllocator.init(allocator);
-    defer arena.deinit();
-
-    const result = try countBytes(arena.allocator(), bytes, options.top, options.max_word);
-    if (options.json) {
-        try renderJson(stdout, result);
+        try renderBench(stdout, io, gpa, bytes, options);
     } else {
-        try renderText(stdout, result);
+        var arena = std.heap.ArenaAllocator.init(gpa);
+        defer arena.deinit();
+
+        const result = try countBytes(arena.allocator(), bytes, options.top, options.max_word);
+        if (options.json) {
+            try stdout.print("{f}\n", .{std.json.fmt(result, .{})});
+        } else {
+            try renderText(stdout, result);
+        }
     }
     try stdout.flush();
 }
 
 fn parseArgs(args: []const []const u8) !Options {
-    var options = Options{ .path = "" };
-    var has_path = false;
+    var options: Options = .{};
+    var seen_path = false;
     var index: usize = 0;
 
     while (index < args.len) : (index += 1) {
@@ -81,79 +85,90 @@ fn parseArgs(args: []const []const u8) !Options {
             options.json = true;
         } else if (std.mem.eql(u8, arg, "--top")) {
             index += 1;
-            if (index >= args.len) return error.Usage;
-            options.top = try std.fmt.parseUnsigned(usize, args[index], 10);
+            if (index == args.len) return error.Usage;
+            options.top = std.fmt.parseUnsigned(usize, args[index], 10) catch return error.Usage;
         } else if (std.mem.startsWith(u8, arg, "--top=")) {
-            options.top = try std.fmt.parseUnsigned(usize, arg["--top=".len..], 10);
+            options.top = std.fmt.parseUnsigned(usize, arg["--top=".len..], 10) catch return error.Usage;
         } else if (std.mem.eql(u8, arg, "--max-word")) {
             index += 1;
-            if (index >= args.len) return error.Usage;
-            options.max_word = try std.fmt.parseUnsigned(usize, args[index], 10);
+            if (index == args.len) return error.Usage;
+            options.max_word = std.fmt.parseUnsigned(usize, args[index], 10) catch return error.Usage;
         } else if (std.mem.startsWith(u8, arg, "--max-word=")) {
-            options.max_word = try std.fmt.parseUnsigned(usize, arg["--max-word=".len..], 10);
+            options.max_word = std.fmt.parseUnsigned(usize, arg["--max-word=".len..], 10) catch return error.Usage;
         } else if (std.mem.eql(u8, arg, "--bench-runs")) {
             index += 1;
-            if (index >= args.len) return error.Usage;
-            options.bench_runs = try std.fmt.parseUnsigned(usize, args[index], 10);
+            if (index == args.len) return error.Usage;
+            options.bench_runs = std.fmt.parseUnsigned(usize, args[index], 10) catch return error.Usage;
         } else if (std.mem.startsWith(u8, arg, "--bench-runs=")) {
-            options.bench_runs = try std.fmt.parseUnsigned(usize, arg["--bench-runs=".len..], 10);
+            options.bench_runs = std.fmt.parseUnsigned(usize, arg["--bench-runs=".len..], 10) catch return error.Usage;
         } else if (std.mem.eql(u8, arg, "--bench-warmups")) {
             index += 1;
-            if (index >= args.len) return error.Usage;
-            options.bench_warmups = try std.fmt.parseUnsigned(usize, args[index], 10);
+            if (index == args.len) return error.Usage;
+            options.bench_warmups = std.fmt.parseUnsigned(usize, args[index], 10) catch return error.Usage;
         } else if (std.mem.startsWith(u8, arg, "--bench-warmups=")) {
-            options.bench_warmups = try std.fmt.parseUnsigned(usize, arg["--bench-warmups=".len..], 10);
+            options.bench_warmups = std.fmt.parseUnsigned(usize, arg["--bench-warmups=".len..], 10) catch return error.Usage;
         } else if (std.mem.startsWith(u8, arg, "-")) {
             return error.Usage;
-        } else if (!has_path) {
+        } else if (!seen_path) {
             options.path = arg;
-            has_path = true;
+            seen_path = true;
         } else {
             return error.Usage;
         }
     }
 
-    if (!has_path or options.top == 0) return error.Usage;
+    if (!seen_path or options.top == 0) return error.Usage;
     return options;
 }
 
-fn countBytes(allocator: std.mem.Allocator, bytes: []const u8, top: usize, max_word: usize) !Result {
-    var counts = std.StringHashMap(u64).init(allocator);
-    var word: std.ArrayList(u8) = .empty;
+fn countBytes(allocator: Allocator, bytes: []u8, top: usize, max_word: usize) !Result {
+    var counts: std.StringHashMapUnmanaged(u64) = .empty;
+    defer counts.deinit(allocator);
+    try counts.ensureTotalCapacity(allocator, estimatedUniqueWords(bytes));
+
     var total: u64 = 0;
-    const normalized_max_word = normalizeMaxWord(max_word);
+    var start: usize = 0;
+    var length: usize = 0;
+    const word_limit = normalizeMaxWord(max_word);
 
-    try counts.ensureTotalCapacity(estimatedUniqueWords(bytes));
-    try word.ensureTotalCapacity(allocator, @min(normalized_max_word, default_max_word));
-
-    for (bytes) |byte| {
+    for (bytes, 0..) |byte, index| {
         if (std.ascii.isAlphabetic(byte)) {
-            if (word.items.len < normalized_max_word) {
-                try word.append(allocator, std.ascii.toLower(byte));
+            if (length < word_limit) {
+                if (length == 0) start = index;
+                bytes[index] = std.ascii.toLower(byte);
+                length += 1;
             }
-        } else if (word.items.len > 0) {
-            try commitWord(allocator, &counts, word.items, &total);
-            word.clearRetainingCapacity();
+        } else if (length > 0) {
+            try bump(allocator, &counts, bytes[start .. start + length], &total);
+            length = 0;
         }
     }
+    if (length > 0) try bump(allocator, &counts, bytes[start .. start + length], &total);
 
-    if (word.items.len > 0) {
-        try commitWord(allocator, &counts, word.items, &total);
-    }
-
-    var entries: std.ArrayList(Entry) = .empty;
-    try entries.ensureTotalCapacity(allocator, counts.count());
+    const entries = try allocator.alloc(Entry, counts.count());
     var iterator = counts.iterator();
-    while (iterator.next()) |kv| {
-        try entries.append(allocator, .{ .word = kv.key_ptr.*, .count = kv.value_ptr.* });
+    var index: usize = 0;
+    while (iterator.next()) |kv| : (index += 1) {
+        entries[index] = .{ .word = kv.key_ptr.*, .count = kv.value_ptr.* };
     }
+    std.sort.pdq(Entry, entries, {}, Entry.lessThan);
 
-    std.mem.sort(Entry, entries.items, {}, compareEntries);
-    if (entries.items.len > top) {
-        entries.shrinkRetainingCapacity(top);
-    }
+    return .{
+        .total = total,
+        .unique = entries.len,
+        .top = entries[0..@min(top, entries.len)],
+    };
+}
 
-    return .{ .total = total, .unique = counts.count(), .top = entries.items };
+fn bump(
+    allocator: Allocator,
+    counts: *std.StringHashMapUnmanaged(u64),
+    word: []const u8,
+    total: *u64,
+) !void {
+    const gop = try counts.getOrPut(allocator, word);
+    gop.value_ptr.* = if (gop.found_existing) gop.value_ptr.* + 1 else 1;
+    total.* += 1;
 }
 
 fn estimatedUniqueWords(bytes: []const u8) u32 {
@@ -163,34 +178,12 @@ fn estimatedUniqueWords(bytes: []const u8) u32 {
 
 fn normalizeMaxWord(value: usize) usize {
     if (value == 0) return default_max_word;
-    if (value < min_word) return min_word;
-    if (value > max_word_limit) return max_word_limit;
-    return value;
-}
-
-fn commitWord(
-    allocator: std.mem.Allocator,
-    counts: *std.StringHashMap(u64),
-    word: []const u8,
-    total: *u64,
-) !void {
-    if (counts.getPtr(word)) |count| {
-        count.* += 1;
-    } else {
-        const key = try allocator.dupe(u8, word);
-        try counts.put(key, 1);
-    }
-    total.* += 1;
-}
-
-fn compareEntries(_: void, left: Entry, right: Entry) bool {
-    if (left.count != right.count) return left.count > right.count;
-    return std.mem.lessThan(u8, left.word, right.word);
+    return std.math.clamp(value, min_word, max_word_limit);
 }
 
 fn countChecksum(
-    allocator: std.mem.Allocator,
-    bytes: []const u8,
+    allocator: Allocator,
+    bytes: []u8,
     top: usize,
     max_word: usize,
 ) !u32 {
@@ -202,9 +195,7 @@ fn countChecksum(
     value = mixU64(value, result.total);
     value = mixU64(value, @intCast(result.unique));
     for (result.top) |entry| {
-        for (entry.word) |byte| {
-            value = mixByte(value, byte);
-        }
+        for (entry.word) |byte| value = mixByte(value, byte);
         value = mixU64(value, entry.count);
     }
     return value;
@@ -237,8 +228,8 @@ fn mixU64(checksum: u32, value: u64) u32 {
 fn renderBench(
     writer: anytype,
     io: Io,
-    allocator: std.mem.Allocator,
-    bytes: []const u8,
+    allocator: Allocator,
+    bytes: []u8,
     options: Options,
 ) !void {
     for (0..options.bench_warmups) |_| {
@@ -256,22 +247,8 @@ fn renderBench(
     try writer.print("{{\"mean_ms\":{d:.6},\"checksum\":{}}}\n", .{ mean_ms, checksum });
 }
 
-fn renderJson(writer: anytype, result: Result) !void {
-    try writer.print("{{\"total\":{},\"unique\":{},\"top\":[", .{ result.total, result.unique });
-    for (result.top, 0..) |entry, index| {
-        try writer.print("{s}{{\"word\":\"{s}\",\"count\":{}}}", .{
-            if (index == 0) "" else ",",
-            entry.word,
-            entry.count,
-        });
-    }
-    try writer.writeAll("]}\n");
-}
-
 fn renderText(writer: anytype, result: Result) !void {
     try writer.writeAll("count word\n");
-    for (result.top) |entry| {
-        try writer.print("{} {s}\n", .{ entry.count, entry.word });
-    }
+    for (result.top) |entry| try writer.print("{} {s}\n", .{ entry.count, entry.word });
     try writer.print("total {}\nunique {}\n", .{ result.total, result.unique });
 }
