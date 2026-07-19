@@ -121,6 +121,9 @@ fn parseArgs(args: []const []const u8) !Options {
     return options;
 }
 
+/// Mutates bytes by lowercasing retained words. The result's entries use
+/// allocator-backed storage and its words alias bytes, so both must remain alive
+/// while the result is used; bytes may safely be counted again.
 fn countBytes(allocator: Allocator, bytes: []u8, top: usize, max_word: usize) !Result {
     var counts: std.StringHashMapUnmanaged(u64) = .empty;
     defer counts.deinit(allocator);
@@ -173,7 +176,7 @@ fn bump(
 
 fn estimatedUniqueWords(bytes: []const u8) u32 {
     const estimate = bytes.len / estimated_bytes_per_unique_word;
-    return @intCast(@min(estimate, std.math.maxInt(u32)));
+    return @intCast(@min(estimate, 1 << 20));
 }
 
 fn normalizeMaxWord(value: usize) usize {
