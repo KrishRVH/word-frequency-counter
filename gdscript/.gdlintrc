@@ -1,0 +1,7 @@
+disable:
+  - class-definitions-order
+excluded_directories:
+  - .godot
+  - .venv
+max-file-lines: 500
+max-line-length: 100

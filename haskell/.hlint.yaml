@@ -1,0 +1,32 @@
+- arguments:
+  - -XGHC2024
+
+- group:
+    name: future
+    enabled: true
+
+- modules:
+  - name: Debug.Trace
+    within: []
+  - name: System.IO.Unsafe
+    within: []
+  - name: Unsafe.Coerce
+    within: []
+
+- functions:
+  - name: error
+    within: []
+  - name: fromJust
+    within: []
+  - name: head
+    within: []
+  - name: init
+    within: []
+  - name: last
+    within: []
+  - name: read
+    within: []
+  - name: tail
+    within: []
+  - name: undefined
+    within: []

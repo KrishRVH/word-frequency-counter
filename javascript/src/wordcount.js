@@ -3,7 +3,7 @@
 
 import { readFileSync } from "node:fs";
 import { performance } from "node:perf_hooks";
-import { pathToFileURL } from "node:url";
+import { parseArgs as parseNodeArgs } from "node:util";
 
 /**
  * @typedef {{ word: string, count: number }} Entry
@@ -24,7 +24,7 @@ const usage = "usage: wordcount_js [--json] [--top N] [--max-word N] <file>";
  * @param {number} maxWord
  * @returns {Result}
  */
-export function countWords(bytes, limit = 10, maxWord = maxWordLimit) {
+function countWords(bytes, limit = 10, maxWord = maxWordLimit) {
   /** @type {Map<string, number>} */
   const counts = new Map();
   let word = "";
@@ -32,9 +32,10 @@ export function countWords(bytes, limit = 10, maxWord = maxWordLimit) {
   const normalizedMaxWord = normalizeMaxWord(maxWord);
 
   for (const byte of bytes) {
-    if (isLetter(byte)) {
+    const lower = byte | 32;
+    if (lower >= 97 && lower <= 122) {
       if (word.length < normalizedMaxWord) {
-        word += String.fromCharCode(lowerAscii(byte));
+        word += String.fromCharCode(lower);
       }
       continue;
     }
@@ -66,7 +67,7 @@ export function countWords(bytes, limit = 10, maxWord = maxWordLimit) {
  * @param {Result} result
  * @returns {string}
  */
-export function renderText(result) {
+function renderText(result) {
   const rows = ["count word"];
 
   for (const entry of result.top) {
@@ -75,23 +76,6 @@ export function renderText(result) {
   rows.push(`total ${result.total}`);
   rows.push(`unique ${result.unique}`);
   return `${rows.join("\n")}\n`;
-}
-
-/**
- * @param {number} byte
- * @returns {boolean}
- */
-function isLetter(byte) {
-  const lower = byte | 32;
-  return lower >= 97 && lower <= 122;
-}
-
-/**
- * @param {number} byte
- * @returns {number}
- */
-function lowerAscii(byte) {
-  return byte >= 65 && byte <= 90 ? byte + 32 : byte;
 }
 
 /**
@@ -108,68 +92,31 @@ function compareAscii(left, right) {
  * @returns {Options}
  */
 function parseArgs(args) {
-  let path;
-  let top = 10;
-  let maxWord = maxWordLimit;
-  let benchRuns = 0;
-  let benchWarmups = 0;
-  let json = false;
-
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index];
-    if (arg === undefined) {
-      break;
-    }
-
-    if (arg === "--json") {
-      json = true;
-    } else if (arg === "--top") {
-      index += 1;
-      top = parseNumber(args[index]);
-    } else if (arg.startsWith("--top=")) {
-      top = parseNumber(arg.slice("--top=".length));
-    } else if (arg === "--max-word") {
-      index += 1;
-      maxWord = parseNumber(args[index]);
-    } else if (arg.startsWith("--max-word=")) {
-      maxWord = parseNumber(arg.slice("--max-word=".length));
-    } else if (arg === "--bench-runs") {
-      index += 1;
-      benchRuns = parseNumber(args[index]);
-    } else if (arg.startsWith("--bench-runs=")) {
-      benchRuns = parseNumber(arg.slice("--bench-runs=".length));
-    } else if (arg === "--bench-warmups") {
-      index += 1;
-      benchWarmups = parseNumber(args[index]);
-    } else if (arg.startsWith("--bench-warmups=")) {
-      benchWarmups = parseNumber(arg.slice("--bench-warmups=".length));
-    } else if (arg.startsWith("-")) {
-      throw new Error(usage);
-    } else if (path === undefined) {
-      path = arg;
-    } else {
-      throw new Error(usage);
-    }
-  }
-
-  if (
-    path === undefined ||
-    !Number.isInteger(top) ||
-    top <= 0 ||
-    !Number.isInteger(maxWord) ||
-    !Number.isInteger(benchRuns) ||
-    !Number.isInteger(benchWarmups)
-  ) {
+  const { values, positionals } = parseNodeArgs({
+    args,
+    allowPositionals: true,
+    strict: true,
+    options: {
+      json: { type: "boolean", default: false },
+      top: { type: "string", default: "10" },
+      "max-word": { type: "string", default: String(maxWordLimit) },
+      "bench-runs": { type: "string", default: "0" },
+      "bench-warmups": { type: "string", default: "0" },
+    },
+  });
+  const top = parseNumber(values.top);
+  const [path] = positionals;
+  if (path === undefined || positionals.length !== 1 || top === 0) {
     throw new Error(usage);
   }
 
   return {
     path,
     top,
-    maxWord: normalizeMaxWord(maxWord),
-    benchRuns,
-    benchWarmups,
-    json,
+    maxWord: normalizeMaxWord(parseNumber(values["max-word"])),
+    benchRuns: parseNumber(values["bench-runs"]),
+    benchWarmups: parseNumber(values["bench-warmups"]),
+    json: values.json,
   };
 }
 
@@ -179,10 +126,13 @@ function parseArgs(args) {
  */
 function parseNumber(value) {
   if (value === undefined || !/^[0-9]+$/.test(value)) {
-    return Number.NaN;
+    throw new Error(usage);
   }
   const parsed = Number(value);
-  return Number.isSafeInteger(parsed) ? parsed : Number.NaN;
+  if (!Number.isSafeInteger(parsed)) {
+    throw new Error(usage);
+  }
+  return parsed;
 }
 
 /**
@@ -275,23 +225,19 @@ function mixUint64(checksumValue, value) {
   return mixed;
 }
 
-const invokedUrl = process.argv[1] && pathToFileURL(process.argv[1]).href;
-if (import.meta.url === invokedUrl) {
-  try {
-    const options = parseArgs(process.argv.slice(2));
-    const bytes = readFileSync(options.path);
-    if (options.benchRuns > 0) {
-      process.stdout.write(renderBench(bytes, options));
-      process.exitCode = 0;
-    } else {
-      const result = countWords(bytes, options.top, options.maxWord);
-      process.stdout.write(
-        options.json ? `${JSON.stringify(result)}\n` : renderText(result),
-      );
-    }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    process.stderr.write(`wordcount_js: ${message}\n`);
-    process.exitCode = 1;
+try {
+  const options = parseArgs(process.argv.slice(2));
+  const bytes = readFileSync(options.path);
+  if (options.benchRuns > 0) {
+    process.stdout.write(renderBench(bytes, options));
+  } else {
+    const result = countWords(bytes, options.top, options.maxWord);
+    process.stdout.write(
+      options.json ? `${JSON.stringify(result)}\n` : renderText(result),
+    );
   }
+} catch (error) {
+  const message = error instanceof Error ? error.message : String(error);
+  process.stderr.write(`wordcount_js: ${message}\n`);
+  process.exitCode = 1;
 }

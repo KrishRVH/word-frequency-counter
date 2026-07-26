@@ -1,7 +1,31 @@
-cognitive-complexity-threshold = 30
+# Keep Clippy suggestions aligned with the pinned toolchain.
+msrv = "1.97.0"
+
+doc-valid-idents = [
+    "API",
+    "APIs",
+    "ASCII",
+    "CLI",
+    "CPU",
+    "FFI",
+    "HTTP",
+    "HTTPS",
+    "ID",
+    "IDs",
+    "IO",
+    "JSON",
+    "MSRV",
+    "OS",
+    "TLS",
+    "URI",
+    "URL",
+    "URLs",
+    "UTF-8",
+    "UUID",
+]
+
 enum-variant-size-threshold = 200
 excessive-nesting-threshold = 5
 max-fn-params-bools = 3
 single-char-binding-names-threshold = 5
 too-many-arguments-threshold = 7
-too-many-lines-threshold = 100

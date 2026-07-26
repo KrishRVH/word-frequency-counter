@@ -1,4 +1,6 @@
 #if !defined(_WIN32)
+// POSIX reserves this feature-test macro for applications.
+// NOLINTNEXTLINE(bugprone-reserved-identifier,cert-dcl37-c,cert-dcl51-cpp)
 #define _POSIX_C_SOURCE 200809L
 #endif
 
@@ -29,9 +31,9 @@ typedef struct {
 
 static void usage(const char *program)
 {
-    (void)fprintf(stderr,
-                  "usage: %s [--json] [--top N] [--max-word N] <file>\n",
-                  program);
+    (void)fputs("usage: ", stderr);
+    (void)fputs(program, stderr);
+    (void)fputs(" [--json] [--top N] [--max-word N] <file>\n", stderr);
 }
 
 static int parse_size(const char *text, size_t *out)
@@ -298,16 +300,17 @@ int main(int argc, char **argv)
     }
 
     if (read_file(options.path, &data, &len) != 0) {
-        (void)fprintf(stderr,
-                      "wordcount_c: cannot read %s: %s\n",
-                      options.path,
-                      strerror(errno));
+        (void)fputs("wordcount_c: cannot read ", stderr);
+        (void)fputs(options.path, stderr);
+        (void)fputs(": ", stderr);
+        (void)fputs(strerror(errno), stderr);
+        (void)fputc('\n', stderr);
         return 1;
     }
 
     if (options.bench_runs > 0u) {
         if (print_bench(data, len, &options) != 0) {
-            (void)fprintf(stderr, "wordcount_c: out of memory\n");
+            (void)fputs("wordcount_c: out of memory\n", stderr);
             free(data);
             return 1;
         }
@@ -316,7 +319,7 @@ int main(int argc, char **argv)
     }
 
     if (wf_count_bytes(data, len, options.max_word, &result) != 0) {
-        (void)fprintf(stderr, "wordcount_c: out of memory\n");
+        (void)fputs("wordcount_c: out of memory\n", stderr);
         free(data);
         return 1;
     }

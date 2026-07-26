@@ -1,0 +1,10 @@
+{
+  "disable_diagnostics": false,
+  "excl_paths": [".git/**", "build/**"],
+  "hover_language": "fortran90",
+  "hover_signature": true,
+  "lowercase_intrinsics": true,
+  "max_comment_line_length": 100,
+  "max_line_length": 100,
+  "source_dirs": ["src/**", "app/**"]
+}

@@ -1,8 +1,8 @@
 package wordcount
 
 import (
-	"io"
-	"sort"
+	"cmp"
+	"slices"
 )
 
 const estimatedBytesPerUniqueWord = 32
@@ -13,25 +13,20 @@ const (
 	minWord        = 4
 )
 
+// Entry is a ranked word and frequency pair.
 type Entry struct {
 	Word  string `json:"word"`
 	Count uint64 `json:"count"`
 }
 
+// Result contains the aggregate count and normalized word frequencies.
 type Result struct {
 	Total  uint64            `json:"total"`
 	Unique int               `json:"unique"`
 	Counts map[string]uint64 `json:"-"`
 }
 
-func Count(reader io.Reader, maxWord int) (Result, error) {
-	bytes, err := io.ReadAll(reader)
-	if err != nil {
-		return Result{}, err
-	}
-	return CountBytes(bytes, maxWord), nil
-}
-
+// CountBytes counts all ASCII words in bytes.
 func CountBytes(bytes []byte, maxWord int) Result {
 	maxWord = NormalizeMaxWord(maxWord)
 	counts := make(map[string]uint64, estimatedUniqueWords(bytes))
@@ -65,17 +60,18 @@ func estimatedUniqueWords(bytes []byte) int {
 	return len(bytes) / estimatedBytesPerUniqueWord
 }
 
+// Top returns at most limit entries in descending frequency and lexical tie order.
 func Top(result Result, limit int) []Entry {
 	entries := make([]Entry, 0, len(result.Counts))
 	for word, count := range result.Counts {
 		entries = append(entries, Entry{Word: word, Count: count})
 	}
 
-	sort.Slice(entries, func(left int, right int) bool {
-		if entries[left].Count != entries[right].Count {
-			return entries[left].Count > entries[right].Count
+	slices.SortFunc(entries, func(left, right Entry) int {
+		if order := cmp.Compare(right.Count, left.Count); order != 0 {
+			return order
 		}
-		return entries[left].Word < entries[right].Word
+		return cmp.Compare(left.Word, right.Word)
 	})
 
 	if limit >= 0 && len(entries) > limit {
@@ -84,6 +80,7 @@ func Top(result Result, limit int) []Entry {
 	return entries
 }
 
+// NormalizeMaxWord clamps maxWord to the supported range, using the default for zero.
 func NormalizeMaxWord(maxWord int) int {
 	switch {
 	case maxWord == 0:

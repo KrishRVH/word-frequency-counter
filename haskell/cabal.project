@@ -1,0 +1,8 @@
+packages: .
+
+tests: False
+benchmarks: False
+write-ghc-environment-files: never
+
+package word-frequency-counter-haskell
+  ghc-options: -Werror

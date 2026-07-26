@@ -1,41 +1,58 @@
 version: "2"
 
 run:
-  timeout: 2m
+  timeout: 3m
   tests: false
 
 linters:
   default: none
   enable:
+    - bidichk
+    - bodyclose
+    - copyloopvar
+    - dupl
+    - durationcheck
     - errcheck
+    - errchkjson
     - errorlint
+    - gocheckcompilerdirectives
     - gocognit
+    - goconst
     - gocritic
     - gosec
-    - govet
     - ineffassign
     - misspell
     - nilerr
+    - nilnesserr
     - nilnil
     - noctx
-    - prealloc
+    - nolintlint
+    - perfsprint
+    - predeclared
+    - recvcheck
     - revive
     - staticcheck
+    - thelper
     - unconvert
     - unparam
     - unused
+    - usetesting
     - wastedassign
   settings:
+    dupl:
+      threshold: 120
     gocognit:
       min-complexity: 15
     gocritic:
       enabled-tags:
         - diagnostic
         - performance
-        - style
       disabled-checks:
         - commentedOutCode
         - hugeParam
+    nolintlint:
+      require-explanation: true
+      require-specific: true
     revive:
       severity: error
       rules:
@@ -46,7 +63,6 @@ linters:
         - name: error-return
         - name: error-strings
         - name: exported
-          disabled: true
         - name: increment-decrement
         - name: range
         - name: receiver-naming

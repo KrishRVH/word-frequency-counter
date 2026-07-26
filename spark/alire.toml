@@ -8,13 +8,13 @@ tags = ["ada", "spark", "benchmark"]
 project-files = ["word_frequency_counter_spark.gpr"]
 
 [[depends-on]]
-gnat_native = "=15.2.1"
+gnat_native = "=16.1.0"
 
 [[depends-on]]
 gprbuild = "=26.0.1"
 
 [[depends-on]]
-gnatprove = "=15.1.0"
+gnatprove = "=16.1.0"
 
 [[depends-on]]
 gnatformat_bin = "=26.0.0"

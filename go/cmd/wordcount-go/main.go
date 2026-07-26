@@ -5,7 +5,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"os"
 	"time"
 
@@ -43,28 +42,18 @@ func run() error {
 	}
 	path := flag.Arg(0)
 
-	if *benchRuns > 0 {
-		bytes, err := readFile(path)
-		if err != nil {
-			return fmt.Errorf("wordcount_go: cannot read %s: %w", path, err)
-		}
-		return printBench(bytes, *topLimit, *maxWord, *benchRuns, *benchWarmups)
-	}
-
-	file, err := os.Open(flag.Arg(0))
-	if err != nil {
-		return fmt.Errorf("wordcount_go: cannot open %s: %w", path, err)
-	}
-
-	result, err := wordcount.Count(file, *maxWord)
-	closeErr := file.Close()
+	// #nosec G304 -- the CLI intentionally reads the user-supplied fixture path.
+	bytes, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("wordcount_go: cannot read %s: %w", path, err)
 	}
-	if closeErr != nil {
-		return fmt.Errorf("wordcount_go: cannot close %s: %w", path, closeErr)
+
+	if *benchRuns > 0 {
+		printBench(bytes, *topLimit, *maxWord, *benchRuns, *benchWarmups)
+		return nil
 	}
 
+	result := wordcount.CountBytes(bytes, *maxWord)
 	report := output{
 		Total:  result.Total,
 		Unique: result.Unique,
@@ -85,22 +74,7 @@ func run() error {
 	return nil
 }
 
-func readFile(path string) ([]byte, error) {
-	// #nosec G304 -- benchmark mode intentionally reads the user-supplied fixture path.
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-
-	bytes, readErr := io.ReadAll(file)
-	closeErr := file.Close()
-	if readErr != nil {
-		return nil, readErr
-	}
-	return bytes, closeErr
-}
-
-func printBench(bytes []byte, top, maxWord, runs, warmups int) error {
+func printBench(bytes []byte, top, maxWord, runs, warmups int) {
 	for range warmups {
 		_ = checksum(wordcount.CountBytes(bytes, maxWord), top)
 	}
@@ -113,7 +87,6 @@ func printBench(bytes []byte, top, maxWord, runs, warmups int) error {
 	meanMs := float64(time.Since(started).Nanoseconds()) / 1_000_000.0 / float64(runs)
 
 	fmt.Printf("{\"mean_ms\":%.6f,\"checksum\":%d}\n", meanMs, checksumValue)
-	return nil
 }
 
 func checksum(result wordcount.Result, top int) uint32 {

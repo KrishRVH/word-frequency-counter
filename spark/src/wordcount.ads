@@ -1,3 +1,4 @@
+with Ada.Containers.Vectors;
 with Ada.Streams;
 with Ada.Strings.Unbounded;
 with Interfaces;
@@ -12,13 +13,15 @@ is
       Occurrences : Count;
    end record;
 
-   type Entry_Array is array (Positive range <>) of Word_Entry;
-   type Entry_Array_Access is access Entry_Array;
+   package Entry_Vectors is new
+     Ada.Containers.Vectors
+       (Index_Type   => Positive,
+        Element_Type => Word_Entry);
 
    type Result is record
       Total  : Count := 0;
       Unique : Natural := 0;
-      Top    : Entry_Array_Access := null;
+      Top    : Entry_Vectors.Vector;
    end record;
 
    function Count_Bytes
@@ -30,5 +33,4 @@ is
 
    procedure Render_JSON (Value : Result);
    procedure Render_Text (Value : Result);
-   procedure Release (Value : in out Result);
 end Wordcount;

@@ -1,0 +1,11 @@
+[project]
+name = "word-frequency-counter-gdscript-tools"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = []
+
+[dependency-groups]
+dev = ["gdtoolkit==4.5.0"]
+
+[tool.uv]
+package = false

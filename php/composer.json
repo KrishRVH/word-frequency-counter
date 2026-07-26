@@ -4,14 +4,19 @@
   "license": "MIT",
   "type": "project",
   "require": {
-    "php": ">=8.5"
+    "php": ">=8.5",
+    "ext-ctype": "*",
+    "ext-filter": "*"
   },
   "require-dev": {
-    "ergebnis/composer-normalize": "^2.50.0",
-    "phpstan/phpstan": "^2.1.39",
-    "phpstan/phpstan-strict-rules": "^2.0.10",
+    "ergebnis/composer-normalize": "^2.52.0",
+    "phpmd/phpmd": "^2.15.0",
+    "phpstan/phpstan": "^2.2.2",
+    "phpstan/phpstan-strict-rules": "^2.0.11",
+    "rector/rector": "^2.5.5",
     "roave/security-advisories": "dev-latest",
-    "slevomat/coding-standard": "^8.27.1",
+    "shipmonk/composer-dependency-analyser": "^1.8.4",
+    "slevomat/coding-standard": "^8.29.0",
     "squizlabs/php_codesniffer": "^4.0.1"
   },
   "autoload": {
@@ -31,8 +36,15 @@
     "check": [
       "@syntax",
       "@style",
-      "@analyze"
+      "@analyze",
+      "@smell",
+      "@deps",
+      "@composer:audit"
     ],
+    "composer:audit": "composer audit --locked --abandoned=report --format=summary",
+    "composer:validate": "composer validate --strict",
+    "dependency-analyser": "composer-dependency-analyser",
+    "deps": "@dependency-analyser",
     "fmt": "phpcbf",
     "lint": [
       "@check"
@@ -40,19 +52,36 @@
     "normalize:check": "composer normalize --dry-run --diff",
     "phpcbf": "phpcbf",
     "phpcs": "phpcs",
+    "phpmd": "php -d error_reporting='E_ALL & ~E_DEPRECATED & ~E_USER_DEPRECATED' vendor/bin/phpmd src text phpmd.xml",
     "phpstan": "php -d disable_functions=proc_open vendor/bin/phpstan analyse --memory-limit=512M",
+    "rector": "rector process",
+    "rector:check": "rector process --dry-run",
+    "smell": "@phpmd",
+    "standards:check": [
+      "@normalize:check",
+      "@composer:validate",
+      "@rector:check",
+      "@check"
+    ],
     "style": "@phpcs",
     "syntax": "php -l src/Cli.php && php -l src/CliOptions.php && php -l src/Entry.php && php -l src/Result.php && php -l src/WordCounter.php && php -l bin/wordcount"
   },
   "scripts-descriptions": {
     "analyze": "Run static analysis with PHPStan.",
     "check": "Run the PHP quality gate without tests.",
+    "composer:audit": "Audit locked Composer dependencies.",
+    "composer:validate": "Validate Composer metadata strictly.",
+    "deps": "Check dependency usage.",
     "fmt": "Auto-fix PHP coding-standard issues.",
     "lint": "Alias for the PHP quality gate.",
     "normalize:check": "Verify composer.json normalization.",
     "phpcbf": "Auto-fix PHPCS violations.",
     "phpcs": "Check coding standards.",
+    "phpmd": "Run maintainability checks.",
     "phpstan": "Run PHPStan analysis.",
+    "rector:check": "Check for pending Rector refactorings.",
+    "smell": "Run maintainability checks.",
+    "standards:check": "Run the complete PHP standards gate.",
     "style": "Run PHP style checks.",
     "syntax": "Run PHP syntax checks."
   }

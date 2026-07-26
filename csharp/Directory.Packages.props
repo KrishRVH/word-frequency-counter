@@ -1,0 +1,10 @@
+<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageVersion Include="Meziantou.Analyzer" Version="3.0.117" />
+    <PackageVersion Include="Roslynator.Analyzers" Version="4.15.0" />
+  </ItemGroup>
+</Project>

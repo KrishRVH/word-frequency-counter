@@ -134,7 +134,9 @@ kotlin/build/** linguist-generated=true
 kotlin/.gradle/** linguist-generated=true
 kotlin/.kotlin/** linguist-generated=true
 elixir/_build/** linguist-generated=true
+elixir/doc/** linguist-generated=true
 elixir/word_count linguist-generated=true
+gdscript/.godot/** linguist-generated=true
 haskell/dist-newstyle/** linguist-generated=true
 .zig-cache/** linguist-generated=true
 zig-out/** linguist-generated=true
@@ -158,6 +160,9 @@ rust/rustfmt.toml linguist-language=Rust
 javascript/package.json linguist-language=JavaScript
 javascript/eslint.config.mjs linguist-language=JavaScript
 javascript/tsconfig.json linguist-language=JavaScript
+typescript/package.json linguist-language=TypeScript
+typescript/eslint.config.mjs linguist-language=TypeScript
+typescript/tsconfig.json linguist-language=TypeScript
 php/composer.json linguist-detectable=false
 php/phpcs.xml linguist-detectable=false
 php/phpstan.neon linguist-detectable=false
@@ -176,6 +181,10 @@ spark/**/*.ads linguist-language=Ada
 spark/**/*.gpr linguist-language=Ada
 spark/gnat.adc linguist-language=Ada
 spark/alire.toml linguist-language=Ada
+gdscript/**/*.gd linguist-language=GDScript
+odin/**/*.odin linguist-language=Odin
+roc/**/*.roc linguist-language=Roc
+shell/**/*.bash linguist-language=Shell
 
 # Binary assets/artifacts
 *.7z binary

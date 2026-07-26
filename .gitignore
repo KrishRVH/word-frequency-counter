@@ -93,7 +93,16 @@ dist-newstyle/
 _build/
 deps/
 *.ez
+elixir/doc/
 elixir/word_count
+
+# Python / GDScript
+.venv/
+__pycache__/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+gdscript/.godot/
 
 # Zig
 .zig-cache/

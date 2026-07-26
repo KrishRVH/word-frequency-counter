@@ -1,6 +1,8 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 plugins {
-    kotlin("jvm") version "2.4.0"
-    id("io.gitlab.arturbosch.detekt") version "1.23.8"
+    kotlin("jvm") version "2.4.10"
+    id("dev.detekt") version "2.0.0-alpha.5"
     application
 }
 
@@ -22,6 +24,7 @@ application {
 
 tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
     compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_26)
         allWarningsAsErrors.set(true)
         freeCompilerArgs.add("-Xjsr305=strict")
     }
@@ -30,16 +33,20 @@ tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach 
 detekt {
     allRules = true
     buildUponDefaultConfig = true
+    basePath.set(projectDir)
+    config.setFrom(files("detekt.yml"))
 }
 
-tasks.withType<io.gitlab.arturbosch.detekt.Detekt>().configureEach {
-    jdkHome.set(file(System.getProperty("java.home")))
-    jvmTarget = "22"
+tasks.withType<dev.detekt.gradle.Detekt>().configureEach {
+    jvmTarget.set("26")
     reports {
+        checkstyle.required.set(true)
         html.required.set(false)
-        md.required.set(false)
+        markdown.required.set(false)
         sarif.required.set(false)
-        txt.required.set(true)
-        xml.required.set(false)
     }
+}
+
+tasks.withType<dev.detekt.gradle.DetektCreateBaselineTask>().configureEach {
+    jvmTarget.set("26")
 }

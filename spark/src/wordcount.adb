@@ -1,16 +1,16 @@
 with Ada.Containers;
 with Ada.Containers.Indefinite_Hashed_Maps;
-with Ada.Containers.Vectors;
 with Ada.Strings.Hash;
 with Ada.Text_IO;
-with Ada.Unchecked_Deallocation;
 with Wordcount_ASCII;
 with Wordcount_Checksum;
+with Wordcount_Scanner;
 
 package body Wordcount
   with SPARK_Mode => Off
 is
    use type Count;
+   use type Ada.Strings.Unbounded.Unbounded_String;
 
    package Count_IO is new Ada.Text_IO.Modular_IO (Count);
    package Natural_IO is new Ada.Text_IO.Integer_IO (Natural);
@@ -22,21 +22,11 @@ is
         Hash            => Ada.Strings.Hash,
         Equivalent_Keys => "=");
 
-   package Entry_Vectors is new
-     Ada.Containers.Vectors
-       (Index_Type   => Positive,
-        Element_Type => Word_Entry);
-
    function Entry_Before
      (Left : Word_Entry; Right : Word_Entry) return Boolean;
 
    package Entry_Sorting is new
      Entry_Vectors.Generic_Sorting ("<" => Entry_Before);
-
-   procedure Free is new
-     Ada.Unchecked_Deallocation
-       (Object => Entry_Array,
-        Name   => Entry_Array_Access);
 
    procedure Commit_Word
      (Counts : in out Word_Maps.Map; Word : String; Total : in out Count);
@@ -68,30 +58,29 @@ is
       Max_Word_Size : constant Wordcount_ASCII.Word_Limit :=
         Wordcount_ASCII.Normalize_Max_Word (Max_Word);
       Output        : Result;
-      Word          : String (1 .. Wordcount_ASCII.Max_Word);
-      Word_Length   : Natural := 0;
+      Scanner       : Wordcount_Scanner.State;
    begin
       Counts.Reserve_Capacity (Ada.Containers.Count_Type (Bytes'Length / 32));
+      Wordcount_Scanner.Reset (Scanner);
 
       for Byte of Bytes loop
          declare
-            Value : constant Wordcount_ASCII.Byte :=
+            Value     : constant Wordcount_ASCII.Byte :=
               Wordcount_ASCII.Byte (Byte);
+            Completed : Boolean;
          begin
-            if Wordcount_ASCII.Is_Letter (Value) then
-               if Word_Length < Max_Word_Size then
-                  Word_Length := Word_Length + 1;
-                  Word (Word_Length) := Wordcount_ASCII.Lower (Value);
-               end if;
-            elsif Word_Length > 0 then
-               Commit_Word (Counts, Word (1 .. Word_Length), Output.Total);
-               Word_Length := 0;
+            Wordcount_Scanner.Consume
+              (Scanner, Value, Max_Word_Size, Completed);
+            if Completed then
+               Commit_Word
+                 (Counts, Wordcount_Scanner.Image (Scanner), Output.Total);
+               Wordcount_Scanner.Reset (Scanner);
             end if;
          end;
       end loop;
 
-      if Word_Length > 0 then
-         Commit_Word (Counts, Word (1 .. Word_Length), Output.Total);
+      if Wordcount_Scanner.Has_Word (Scanner) then
+         Commit_Word (Counts, Wordcount_Scanner.Image (Scanner), Output.Total);
       end if;
 
       Output.Unique := Natural (Counts.Length);
@@ -112,10 +101,8 @@ is
       Limit := Natural'Min (Top, Natural (Entries.Length));
 
       if Limit > 0 then
-         Output.Top := new Entry_Array (1 .. Limit);
-
          for Index in 1 .. Limit loop
-            Output.Top (Index) := Entries.Element (Index);
+            Output.Top.Append (Entries.Element (Index));
          end loop;
       end if;
 
@@ -124,16 +111,12 @@ is
 
    function Entry_Before (Left : Word_Entry; Right : Word_Entry) return Boolean
    is
-      Left_Word  : constant String :=
-        Ada.Strings.Unbounded.To_String (Left.Word);
-      Right_Word : constant String :=
-        Ada.Strings.Unbounded.To_String (Right.Word);
    begin
       if Left.Occurrences /= Right.Occurrences then
          return Left.Occurrences > Right.Occurrences;
       end if;
 
-      return Left_Word < Right_Word;
+      return Left.Word < Right.Word;
    end Entry_Before;
 
    function Checksum (Value : Result) return Interfaces.Unsigned_32 is
@@ -144,8 +127,8 @@ is
         Wordcount_Checksum.Mix_U64
           (Mixed, Wordcount_Checksum.Count (Value.Unique));
 
-      if Value.Top /= null then
-         for Item of Value.Top.all loop
+      if not Value.Top.Is_Empty then
+         for Item of Value.Top loop
             declare
                Word : constant String :=
                  Ada.Strings.Unbounded.To_String (Item.Word);
@@ -187,8 +170,8 @@ is
       Put_Natural (Value.Unique);
       Ada.Text_IO.Put (",""top"":[");
 
-      if Value.Top /= null then
-         for Item of Value.Top.all loop
+      if not Value.Top.Is_Empty then
+         for Item of Value.Top loop
             if First then
                First := False;
             else
@@ -210,8 +193,8 @@ is
    begin
       Ada.Text_IO.Put_Line ("count word");
 
-      if Value.Top /= null then
-         for Item of Value.Top.all loop
+      if not Value.Top.Is_Empty then
+         for Item of Value.Top loop
             Put_Count (Item.Occurrences);
             Ada.Text_IO.Put (" ");
             Ada.Text_IO.Put_Line (Ada.Strings.Unbounded.To_String (Item.Word));
@@ -226,13 +209,4 @@ is
       Ada.Text_IO.New_Line;
    end Render_Text;
 
-   procedure Release (Value : in out Result) is
-   begin
-      if Value.Top /= null then
-         Free (Value.Top);
-      end if;
-
-      Value.Total := 0;
-      Value.Unique := 0;
-   end Release;
 end Wordcount;

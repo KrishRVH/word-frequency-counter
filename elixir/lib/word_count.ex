@@ -5,6 +5,11 @@ defmodule WordCount do
   @max_word 1024
   @min_word 4
 
+  @spec count_bytes(binary(), pos_integer(), non_neg_integer()) :: %{
+          total: non_neg_integer(),
+          unique: non_neg_integer(),
+          top: [%{word: binary(), count: pos_integer()}]
+        }
   def count_bytes(bytes, top, max_word) when is_binary(bytes) do
     max_word = normalize_max_word(max_word)
 
@@ -17,9 +22,9 @@ defmodule WordCount do
 
     entries =
       counts
-      |> Enum.map(fn {word, count} -> %{word: word, count: count} end)
-      |> Enum.sort_by(fn entry -> {-entry.count, entry.word} end)
+      |> Enum.sort_by(fn {word, count} -> {-count, word} end)
       |> Enum.take(top)
+      |> Enum.map(fn {word, count} -> %{word: word, count: count} end)
 
     %{total: total, unique: map_size(counts), top: entries}
   end

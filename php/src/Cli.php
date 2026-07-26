@@ -14,12 +14,7 @@ final class Cli
     private const int CHECKSUM_OFFSET = 2_166_136_261;
     private const int CHECKSUM_PRIME = 16_777_619;
     private const int CHECKSUM_MOD = 4_294_967_296;
-    private const array NUMBER_OPTIONS = [
-        'top' => ['--top', '--top='],
-        'maxWord' => ['--max-word', '--max-word='],
-        'benchRuns' => ['--bench-runs', '--bench-runs='],
-        'benchWarmups' => ['--bench-warmups', '--bench-warmups='],
-    ];
+    private const array NUMBER_OPTIONS = ['--top', '--max-word', '--bench-runs', '--bench-warmups'];
 
     /**
      * @param list<string> $arguments
@@ -28,14 +23,18 @@ final class Cli
     {
         try {
             $options = self::parse($arguments);
-            $counter = new WordCounter();
+            $bytes = file_get_contents($options->path);
+            if ($bytes === false) {
+                throw new RuntimeException("cannot read {$options->path}");
+            }
+
             if ($options->benchRuns > 0) {
-                self::write($stdout, self::renderBench($counter, $options));
+                self::write($stdout, self::renderBench($bytes, $options));
 
                 return 0;
             }
 
-            $result = $counter->countFile($options->path, $options->top, $options->maxWord);
+            $result = WordCounter::countBytes($bytes, $options->top, $options->maxWord);
             self::write($stdout, $options->json ? self::renderJson($result) : self::renderText($result));
 
             return 0;
@@ -59,7 +58,7 @@ final class Cli
             return [];
         }
 
-        return array_values(array_filter($arguments, 'is_string'));
+        return array_values(array_filter($arguments, is_string(...)));
     }
 
     /**
@@ -68,12 +67,10 @@ final class Cli
     private static function parse(array $arguments): CliOptions
     {
         $json = false;
-        $numberOptions = [
-            'top' => 10,
-            'maxWord' => 1024,
-            'benchRuns' => 0,
-            'benchWarmups' => 0,
-        ];
+        $top = 10;
+        $maxWord = 1024;
+        $benchRuns = 0;
+        $benchWarmups = 0;
         $path = null;
         $argumentCount = count($arguments);
 
@@ -85,10 +82,17 @@ final class Cli
                 continue;
             }
 
-            $numberOption = self::readConfiguredNumberOption($arguments, $argument, $index);
-            if ($numberOption !== null) {
-                $index = $numberOption['index'];
-                $numberOptions[$numberOption['key']] = $numberOption['value'];
+            [$name, $inline] = array_pad(explode('=', $argument, 2), 2, null);
+            if (in_array($name, self::NUMBER_OPTIONS, true)) {
+                $value = self::parseNumber($inline ?? $arguments[++$index] ?? null);
+                [$top, $maxWord, $benchRuns, $benchWarmups] = self::applyNumberOption(
+                    $name,
+                    $value,
+                    $top,
+                    $maxWord,
+                    $benchRuns,
+                    $benchWarmups,
+                );
                 continue;
             }
 
@@ -104,65 +108,38 @@ final class Cli
             throw new InvalidArgumentException('too many file operands');
         }
 
-        if ($path === null || $numberOptions['top'] <= 0) {
+        if ($path === null || $top <= 0) {
             throw new InvalidArgumentException('invalid options');
         }
 
         return new CliOptions(
             $path,
-            $numberOptions['top'],
-            $numberOptions['maxWord'],
-            $numberOptions['benchRuns'],
-            $numberOptions['benchWarmups'],
+            $top,
+            $maxWord,
+            $benchRuns,
+            $benchWarmups,
             $json,
         );
     }
 
     /**
-     * @param list<string> $arguments
-     *
-     * @return array{index: int, key: string, value: int}|null
+     * @return array{int, int, int, int}
      */
-    private static function readConfiguredNumberOption(
-        array $arguments,
-        string $argument,
-        int $index,
-    ): ?array {
-        foreach (self::NUMBER_OPTIONS as $key => [$name, $prefix]) {
-            $option = self::readNumberOption($arguments, $argument, $name, $prefix, $index);
-            if ($option === null) {
-                continue;
-            }
-
-            return ['index' => $option['index'], 'key' => $key, 'value' => $option['value']];
-        }
-
-        return null;
-    }
-
-    /**
-     * @param list<string> $arguments
-     *
-     * @return array{index: int, value: int}|null
-     */
-    private static function readNumberOption(
-        array $arguments,
-        string $argument,
+    private static function applyNumberOption(
         string $name,
-        string $prefix,
-        int $index,
-    ): ?array {
-        if ($argument === $name) {
-            $index++;
-
-            return ['index' => $index, 'value' => self::parseNumber($arguments[$index] ?? null)];
-        }
-
-        if (str_starts_with($argument, $prefix)) {
-            return ['index' => $index, 'value' => self::parseNumber(substr($argument, strlen($prefix)))];
-        }
-
-        return null;
+        int $value,
+        int $top,
+        int $maxWord,
+        int $benchRuns,
+        int $benchWarmups,
+    ): array {
+        return match ($name) {
+            '--top' => [$value, $maxWord, $benchRuns, $benchWarmups],
+            '--max-word' => [$top, $value, $benchRuns, $benchWarmups],
+            '--bench-runs' => [$top, $maxWord, $value, $benchWarmups],
+            '--bench-warmups' => [$top, $maxWord, $benchRuns, $value],
+            default => throw new InvalidArgumentException('unknown numeric option'),
+        };
     }
 
     private static function parseNumber(?string $value): int
@@ -206,18 +183,13 @@ final class Cli
         return implode("\n", $lines) . "\n";
     }
 
-    private static function renderBench(WordCounter $counter, CliOptions $options): string
+    private static function renderBench(string $bytes, CliOptions $options): string
     {
-        $bytes = file_get_contents($options->path);
-        if ($bytes === false) {
-            throw new RuntimeException("cannot read {$options->path}");
-        }
-
         $checksum = self::CHECKSUM_OFFSET;
         for ($index = 0; $index < $options->benchWarmups; $index++) {
             $checksum = self::mixUint32(
                 $checksum,
-                self::checksum($counter->countBytes($bytes, $options->top, $options->maxWord)),
+                self::checksum(WordCounter::countBytes($bytes, $options->top, $options->maxWord)),
             );
         }
 
@@ -226,7 +198,7 @@ final class Cli
         for ($index = 0; $index < $options->benchRuns; $index++) {
             $checksum = self::mixUint32(
                 $checksum,
-                self::checksum($counter->countBytes($bytes, $options->top, $options->maxWord)),
+                self::checksum(WordCounter::countBytes($bytes, $options->top, $options->maxWord)),
             );
         }
         $meanMs = ((float) (hrtime(true) - $started)) / 1_000_000.0 / (float) $options->benchRuns;
@@ -284,6 +256,12 @@ final class Cli
             throw new InvalidArgumentException('expected output stream resource');
         }
 
-        fwrite($stream, $message);
+        while ($message !== '') {
+            $written = fwrite($stream, $message);
+            if ($written === false || $written === 0) {
+                throw new RuntimeException('cannot write output');
+            }
+            $message = substr($message, $written);
+        }
     }
 }

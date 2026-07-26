@@ -5,6 +5,7 @@ defmodule WordCount.CLI do
   @checksum_offset 2_166_136_261
   @checksum_prime 16_777_619
 
+  @spec main([binary()]) :: :ok
   def main(args) do
     with {:ok, options} <- parse(args),
          {:ok, bytes} <- File.read(options.path) do

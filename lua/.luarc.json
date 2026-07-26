@@ -1,0 +1,11 @@
+{
+  "$schema": "https://raw.githubusercontent.com/LuaLS/vscode-lua/master/setting/schema.json",
+  "runtime.version": "Lua 5.5",
+  "workspace.ignoreDir": [
+    ".lua-language-server",
+    ".lua_modules",
+    "build",
+    "lua_modules",
+    "vendor"
+  ]
+}

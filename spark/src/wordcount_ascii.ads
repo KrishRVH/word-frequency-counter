@@ -36,7 +36,9 @@ is
      Depends => (Lower'Result => Value),
      Pre     => Is_Letter (Value),
      Post    =>
-       (if Value >= Character'Pos ('A') and Value <= Character'Pos ('Z')
-        then Character'Pos (Lower'Result) = Value + 32
-        else Character'Pos (Lower'Result) = Value);
+       Lower'Result in 'a' .. 'z'
+       and then (if Value >= Character'Pos ('A')
+                   and Value <= Character'Pos ('Z')
+                 then Character'Pos (Lower'Result) = Value + 32
+                 else Character'Pos (Lower'Result) = Value);
 end Wordcount_ASCII;

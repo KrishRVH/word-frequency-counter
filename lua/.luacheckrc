@@ -1,7 +1,3 @@
--- Luacheck strict baseline.
---
--- Keep this project-specific copy aligned with ~/dev/personal/standards/Lua.
-
 std = "lua54"
 
 allow_defined = false
@@ -24,13 +20,14 @@ max_line_length = 80
 max_cyclomatic_complexity = 10
 
 exclude_files = {
+  ".lua-language-server/**",
   ".lua_modules/**",
   "lua_modules/**",
   "luarocks_modules/**",
-  "vendor/**",
   "third_party/**",
+  "vendor/**",
   "build/**",
-  "dist/**",
   "coverage/**",
+  "dist/**",
   "*.min.lua",
 }

@@ -1,0 +1,45 @@
+[project]
+name = "word-frequency-counter"
+version = "0.1.0"
+requires-python = ">=3.14"
+dependencies = []
+
+[dependency-groups]
+dev = [
+  "bandit[toml]>=1.9.4",
+  "basedpyright>=1.39.8",
+  "ruff>=0.15.18",
+]
+
+[tool.ruff]
+line-length = 100
+required-version = ">=0.15.18"
+show-fixes = true
+src = ["src"]
+target-version = "py314"
+
+[tool.ruff.format]
+line-ending = "lf"
+
+[tool.ruff.lint]
+select = ["B", "E4", "E7", "E9", "F", "I", "UP"]
+
+[tool.basedpyright]
+include = ["src"]
+pythonVersion = "3.14"
+pythonPlatform = "All"
+typeCheckingMode = "all"
+venvPath = "."
+venv = ".venv"
+failOnWarnings = true
+reportAny = "error"
+reportExplicitAny = "error"
+reportImplicitOverride = "error"
+reportMissingTypeStubs = "error"
+reportUnreachable = "error"
+reportUnusedCallResult = "none"
+
+[tool.bandit]
+exclude_dirs = [".venv"]
+recursive = true
+targets = ["src"]

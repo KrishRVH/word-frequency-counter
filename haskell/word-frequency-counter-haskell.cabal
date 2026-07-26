@@ -7,15 +7,20 @@ license: MIT
 maintainer: krvh
 category: Text
 build-type: Simple
+tested-with: GHC == 9.14.1
 
 common warnings
   ghc-options:
     -Wall
     -Wcompat
+    -Widentities
     -Wincomplete-record-updates
     -Wincomplete-uni-patterns
-    -Widentities
+    -Wmissing-deriving-strategies
+    -Wmissing-export-lists
+    -Wpartial-fields
     -Wredundant-constraints
+    -Wunused-packages
 
 executable wordcount-haskell
   import: warnings

@@ -1,5 +1,5 @@
 import { mkdirSync, statSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { arch, cpus, homedir, platform, release } from "node:os";
 import { join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { spawn } from "node:child_process";
@@ -74,11 +74,12 @@ type BenchmarkState = {
 };
 
 type BenchmarkResult = {
-  warmTaskMeanMs: number;
-  totalMeanMs: number;
-  startupMeanMs: number;
-  adjustedMeanMs: number;
-  adjustedP95Ms: number;
+  warmTaskMedianMs: number;
+  warmTaskWorstMs: number;
+  totalMedianMs: number;
+  startupMedianMs: number;
+  adjustedMedianMs: number;
+  adjustedWorstMs: number;
 };
 
 type WarmTaskResult = { mean_ms: number; checksum: number | string };
@@ -98,8 +99,7 @@ const csharpBin = join(
 const validationFixtures = join(root, "build", "fixtures");
 const legacyBenchmarkFixture = join(validationFixtures, "benchmark.txt");
 const startupFixture = join(validationFixtures, "startup-empty.txt");
-const haskellBuild = join(root, "build", "haskell");
-const fortranBuild = join(root, "build", "fortran");
+const fortranInstall = join(root, "build", "fortran-install");
 const tokenfreqRoot = join(homedir(), "dev/personal/tokenfreq-c99");
 const defaultOracle = join(tokenfreqRoot, "build/clang/wc");
 const benchmarkWords = [
@@ -406,21 +406,114 @@ const implementations: Implementation[] = [
     }),
   },
   {
-    name: "zig",
+    name: "gdscript",
+    run: (fixture, top, maxWord) => ({
+      cmd: "godot",
+      args: [
+        "--headless",
+        "--no-header",
+        "--path",
+        "gdscript",
+        "--script",
+        "src/wordcount.gd",
+        "--",
+        "--json",
+        "--top",
+        String(top),
+        "--max-word",
+        String(maxWord),
+        fixture,
+      ],
+    }),
+  },
+  {
+    name: "odin",
     build: [
       {
-        cmd: "zig",
+        cmd: "odin",
         args: [
-          "build-exe",
-          "-O",
-          "ReleaseFast",
-          "-femit-bin=build/bin/wordcount_zig",
-          "zig/src/main.zig",
+          "build",
+          "odin/src",
+          "-o:speed",
+          "-out:build/bin/wordcount_odin",
         ],
       },
     ],
     run: (fixture, top, maxWord) => ({
-      cmd: join(buildBin, "wordcount_zig"),
+      cmd: join(buildBin, "wordcount_odin"),
+      args: [
+        "--json",
+        "--top",
+        String(top),
+        "--max-word",
+        String(maxWord),
+        fixture,
+      ],
+    }),
+  },
+  {
+    name: "python",
+    run: (fixture, top, maxWord) => ({
+      cmd: "python",
+      args: [
+        "python/src/wordcount.py",
+        "--json",
+        "--top",
+        String(top),
+        "--max-word",
+        String(maxWord),
+        fixture,
+      ],
+    }),
+  },
+  {
+    name: "shell",
+    run: (fixture, top, maxWord) => ({
+      cmd: "bash",
+      args: [
+        "shell/wordcount.bash",
+        "--json",
+        "--top",
+        String(top),
+        "--max-word",
+        String(maxWord),
+        fixture,
+      ],
+    }),
+  },
+  {
+    name: "typescript",
+    build: [
+      {
+        cwd: join(root, "typescript"),
+        cmd: "bun",
+        args: ["install", "--frozen-lockfile"],
+      },
+    ],
+    run: (fixture, top, maxWord) => ({
+      cmd: "bun",
+      args: [
+        "typescript/src/wordcount.ts",
+        "--json",
+        "--top",
+        String(top),
+        "--max-word",
+        String(maxWord),
+        fixture,
+      ],
+    }),
+  },
+  {
+    name: "zig",
+    build: [
+      {
+        cwd: join(root, "zig"),
+        cmd: "zig",
+        args: ["build", "-Doptimize=ReleaseFast"],
+      },
+    ],
+    run: (fixture, top, maxWord) => ({
+      cmd: join(root, "zig/zig-out/bin/wordcount_zig"),
       args: [
         "--json",
         "--top",
@@ -435,6 +528,7 @@ const implementations: Implementation[] = [
     name: "haskell",
     build: [
       {
+        cwd: join(root, "haskell"),
         cmd: "ghcup",
         args: [
           "run",
@@ -442,16 +536,12 @@ const implementations: Implementation[] = [
           "--ghc",
           "9.14.1",
           "--",
-          "ghc",
-          "-O2",
-          "-Wall",
-          "-Werror",
-          "-outputdir",
-          haskellBuild,
-          "-i" + join(root, "haskell/app"),
-          "-o",
-          join(buildBin, "wordcount_haskell"),
-          "haskell/app/Main.hs",
+          "cabal",
+          "install",
+          "exe:wordcount-haskell",
+          "--installdir=" + buildBin,
+          "--install-method=copy",
+          "--overwrite-policy=always",
         ],
       },
     ],
@@ -471,27 +561,23 @@ const implementations: Implementation[] = [
     name: "fortran",
     build: [
       {
-        cmd: "gfortran",
+        cwd: join(root, "fortran"),
+        cmd: "fpm",
         args: [
-          "-std=f2018",
-          "-O2",
-          "-Wall",
-          "-Wextra",
-          "-Wimplicit-interface",
-          "-Wimplicit-procedure",
-          "-Wsurprising",
-          "-Werror",
-          "-pedantic",
-          "-J",
-          fortranBuild,
-          "-o",
-          join(buildBin, "wordcount_fortran"),
-          "fortran/src/main.f90",
+          "install",
+          "--compiler",
+          "gfortran",
+          "--profile",
+          "release",
+          "--prefix",
+          fortranInstall,
+          "--flag",
+          "-std=f2018 -Wall -Wextra -Wimplicit-interface -Wimplicit-procedure -Wsurprising -Werror -pedantic",
         ],
       },
     ],
     run: (fixture, top, maxWord) => ({
-      cmd: join(buildBin, "wordcount_fortran"),
+      cmd: join(fortranInstall, "bin/wordcount_fortran"),
       args: [
         "--json",
         "--top",
@@ -537,8 +623,6 @@ const implementations: Implementation[] = [
 const options = parseArgs(process.argv.slice(2));
 mkdirSync(buildBin, { recursive: true });
 mkdirSync(validationFixtures, { recursive: true });
-mkdirSync(haskellBuild, { recursive: true });
-mkdirSync(fortranBuild, { recursive: true });
 const benchmarkFixtures = createBenchmarkFixtures(options);
 writeFileSync(startupFixture, "");
 
@@ -579,6 +663,7 @@ if (!options.buildOnly) {
   }
 
   if (!options.validateOnly) {
+    await printBenchmarkContext(options);
     for (const benchmarkFixture of benchmarkFixtures) {
       const expected = expectedByName.get(
         validationNameForBenchmarkFixture(benchmarkFixture),
@@ -624,15 +709,15 @@ function parseArgs(args: string[]): BenchOptions {
     runs: 5,
     warmups: parseDecimal(process.env.WFC_WARMUPS ?? "3", "WFC_WARMUPS"),
     warmTaskSamples: parseDecimal(
-      process.env.WFC_WARM_TASK_SAMPLES ?? "3",
+      process.env.WFC_WARM_TASK_SAMPLES ?? "5",
       "WFC_WARM_TASK_SAMPLES",
     ),
     warmTaskRuns: parseDecimal(
-      process.env.WFC_WARM_TASK_RUNS ?? "50",
+      process.env.WFC_WARM_TASK_RUNS ?? "10",
       "WFC_WARM_TASK_RUNS",
     ),
     warmTaskWarmups: parseDecimal(
-      process.env.WFC_WARM_TASK_WARMUPS ?? "10",
+      process.env.WFC_WARM_TASK_WARMUPS ?? "3",
       "WFC_WARM_TASK_WARMUPS",
     ),
     buildOnly: false,
@@ -1105,11 +1190,12 @@ async function benchmarkAll(
     states.map((state) => [
       state.implementation.name,
       {
-        warmTaskMeanMs: mean(state.warmTaskSamples),
-        totalMeanMs: mean(state.totalSamples),
-        startupMeanMs: mean(state.startupSamples),
-        adjustedMeanMs: mean(state.adjustedSamples),
-        adjustedP95Ms: percentile(state.adjustedSamples, 0.95),
+        warmTaskMedianMs: median(state.warmTaskSamples),
+        warmTaskWorstMs: Math.max(...state.warmTaskSamples),
+        totalMedianMs: median(state.totalSamples),
+        startupMedianMs: median(state.startupSamples),
+        adjustedMedianMs: median(state.adjustedSamples),
+        adjustedWorstMs: Math.max(...state.adjustedSamples),
       },
     ]),
   );
@@ -1236,8 +1322,8 @@ function rotated<T>(items: T[], offset: number) {
   return [...items.slice(start), ...items.slice(0, start)];
 }
 
-function mean(samples: number[]) {
-  return samples.reduce((sum, sample) => sum + sample, 0) / samples.length;
+function median(samples: number[]) {
+  return percentile(samples, 0.5);
 }
 
 function percentile(samples: number[], quantile: number) {
@@ -1286,6 +1372,47 @@ function printSummary(
   printSingleFixtureSummary(rows, benchmarkFixtures[0]);
 }
 
+async function printBenchmarkContext(options: BenchOptions) {
+  const processors = cpus();
+  const cpu = processors[0]?.model.trim() ?? "unknown CPU";
+  const revision = (
+    await run({
+      cmd: "git",
+      args: ["rev-parse", "--short", "HEAD"],
+    })
+  ).trim();
+  const dirty =
+    (
+      await run({
+        cmd: "git",
+        args: ["status", "--porcelain"],
+      })
+    ).trim() !== "";
+  const tools = JSON.parse(
+    await run({
+      cmd: "mise",
+      args: ["ls", "--current", "--json"],
+    }),
+  ) as Record<string, { active: boolean; version: string }[]>;
+  const toolchainMatrix = Object.entries(tools)
+    .flatMap(([name, versions]) =>
+      versions
+        .filter(({ active }) => active)
+        .map(({ version }) => `${name}@${version}`),
+    )
+    .sort()
+    .join(", ");
+
+  console.log(
+    `Benchmark host: ${platform()} ${release()} ${arch()}; ${cpu}; ${processors.length} logical CPUs; Bun ${Bun.version}`,
+  );
+  console.log(
+    `Recorded: ${new Date().toISOString()}; revision: ${revision}${dirty ? "+dirty" : ""}; warm samples: ${options.warmTaskSamples}; runs/sample: ${options.warmTaskRuns}; warmups/sample: ${options.warmTaskWarmups}; CLI samples: ${options.runs}`,
+  );
+  console.log(`Toolchains: ${toolchainMatrix}`);
+  console.log("");
+}
+
 function printCorpus(benchmarkFixtures: BenchmarkFixture[]) {
   console.log("| fixture | bytes | role | notes |");
   console.log("|---|---:|---|---|");
@@ -1308,33 +1435,37 @@ function printCorpusSummary(
     benchmarkFixtures[0];
   const displayRows = [...rows].sort(
     (left, right) =>
-      (left.timings.get(primaryFixture.name)?.warmTaskMeanMs ??
+      (left.timings.get(primaryFixture.name)?.warmTaskMedianMs ??
         Number.POSITIVE_INFINITY) -
-      (right.timings.get(primaryFixture.name)?.warmTaskMeanMs ??
+      (right.timings.get(primaryFixture.name)?.warmTaskMedianMs ??
         Number.POSITIVE_INFINITY),
   );
   const timingColumns = benchmarkFixtures
-    .map((benchmarkFixture) => ` ${benchmarkFixture.name} warm ms `)
+    .map((benchmarkFixture) => ` ${benchmarkFixture.name} warm median ms `)
     .join("|");
   const alignmentColumns = benchmarkFixtures.map(() => "---:").join("|");
 
   console.log(
-    `| implementation |${timingColumns}| ${primaryFixture.name} MB/s | ${primaryFixture.name} adjusted CLI ms |`,
+    `| implementation |${timingColumns}| ${primaryFixture.name} warm worst ms | ${primaryFixture.name} MB/s | ${primaryFixture.name} adjusted CLI median ms | ${primaryFixture.name} adjusted CLI worst ms |`,
   );
-  console.log(`|---|${alignmentColumns}|---:|---:|`);
+  console.log(`|---|${alignmentColumns}|---:|---:|---:|---:|`);
   for (const row of displayRows) {
     const timingCells = benchmarkFixtures
       .map((benchmarkFixture) =>
-        formatMaybe(row.timings.get(benchmarkFixture.name)?.warmTaskMeanMs),
+        formatMaybe(row.timings.get(benchmarkFixture.name)?.warmTaskMedianMs),
       )
       .join(" | ");
     const primaryTiming = row.timings.get(primaryFixture.name);
     console.log(
-      `| ${row.name} | ${timingCells} | ${
+      `| ${row.name} | ${timingCells} | ${formatMaybe(
+        primaryTiming?.warmTaskWorstMs,
+      )} | ${
         primaryTiming === undefined
           ? ""
           : throughputMiBPerSecond(primaryFixture.bytes, primaryTiming)
-      } | ${formatMaybe(primaryTiming?.adjustedMeanMs)} |`,
+      } | ${formatMaybe(primaryTiming?.adjustedMedianMs)} | ${formatMaybe(
+        primaryTiming?.adjustedWorstMs,
+      )} |`,
     );
   }
 }
@@ -1345,27 +1476,29 @@ function printSingleFixtureSummary(
 ) {
   const displayRows = [...rows].sort(
     (left, right) =>
-      (left.timings.get(benchmarkFixture.name)?.warmTaskMeanMs ??
+      (left.timings.get(benchmarkFixture.name)?.warmTaskMedianMs ??
         Number.POSITIVE_INFINITY) -
-      (right.timings.get(benchmarkFixture.name)?.warmTaskMeanMs ??
+      (right.timings.get(benchmarkFixture.name)?.warmTaskMedianMs ??
         Number.POSITIVE_INFINITY),
   );
 
   console.log(
-    "| implementation | warm task mean ms | warm task MB/s | raw CLI mean ms | startup mean ms | adjusted CLI mean ms | adjusted CLI p95 ms |",
+    "| implementation | warm median ms | warm worst ms | warm MB/s | raw CLI median ms | startup median ms | adjusted CLI median ms | adjusted CLI worst ms |",
   );
-  console.log("|---|---:|---:|---:|---:|---:|---:|");
+  console.log("|---|---:|---:|---:|---:|---:|---:|---:|");
   for (const row of displayRows) {
     const timing = row.timings.get(benchmarkFixture.name);
     console.log(
-      `| ${row.name} | ${formatMaybe(timing?.warmTaskMeanMs)} | ${
+      `| ${row.name} | ${formatMaybe(timing?.warmTaskMedianMs)} | ${formatMaybe(
+        timing?.warmTaskWorstMs,
+      )} | ${
         timing === undefined
           ? ""
           : throughputMiBPerSecond(benchmarkFixture.bytes, timing)
-      } | ${formatMaybe(timing?.totalMeanMs)} | ${formatMaybe(
-        timing?.startupMeanMs,
-      )} | ${formatMaybe(timing?.adjustedMeanMs)} | ${formatMaybe(
-        timing?.adjustedP95Ms,
+      } | ${formatMaybe(timing?.totalMedianMs)} | ${formatMaybe(
+        timing?.startupMedianMs,
+      )} | ${formatMaybe(timing?.adjustedMedianMs)} | ${formatMaybe(
+        timing?.adjustedWorstMs,
       )} |`,
     );
   }
@@ -1376,11 +1509,11 @@ function formatMaybe(value: number | undefined) {
 }
 
 function throughputMiBPerSecond(bytes: number, timing: BenchmarkResult) {
-  if (timing.warmTaskMeanMs === 0) {
+  if (timing.warmTaskMedianMs === 0) {
     return "inf";
   }
   const mib = bytes / 1024 / 1024;
-  return (mib / (timing.warmTaskMeanMs / 1000)).toFixed(1);
+  return (mib / (timing.warmTaskMedianMs / 1000)).toFixed(1);
 }
 
 async function run(command: Command): Promise<string> {

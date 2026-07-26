@@ -1,0 +1,15 @@
+[licenses]
+allow = [
+    "MIT",
+]
+confidence-threshold = 0.8
+
+[bans]
+highlight = "all"
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+unknown-git = "deny"
+unknown-registry = "deny"

@@ -4,44 +4,28 @@ declare(strict_types=1);
 
 namespace WordFrequencyCounter;
 
-use RuntimeException;
-
 final class WordCounter
 {
     private const int ORACLE_DEFAULT_MAX_WORD = 64;
     private const int MAX_WORD_LIMIT = 1024;
     private const int MIN_WORD = 4;
 
-    public function countFile(string $path, int $top, int $maxWord): Result
+    public static function countBytes(string $bytes, int $top, int $maxWord): Result
     {
-        if (!is_file($path) || !is_readable($path)) {
-            throw new RuntimeException("cannot read {$path}");
-        }
+        $maxWord = self::normalizeMaxWord($maxWord);
 
-        $bytes = file_get_contents($path);
-        if ($bytes === false) {
-            throw new RuntimeException("cannot read {$path}");
-        }
-
-        return $this->countBytes($bytes, $top, $maxWord);
-    }
-
-    public function countBytes(string $bytes, int $top, int $maxWord): Result
-    {
-        $maxWord = $this->normalizeMaxWord($maxWord);
-
-        /** @phpstan-var array<array-key, int> $counts */
+        /** @phpstan-var array<string, int> $counts */
         $counts = [];
         $word = '';
         $total = 0;
         $length = strlen($bytes);
 
         for ($index = 0; $index < $length; $index++) {
-            $byte = ord($bytes[$index]);
+            $lower = ord($bytes[$index]) | 32;
 
-            if ($this->isLetter($byte)) {
+            if ($lower >= 97 && $lower <= 122) {
                 if (strlen($word) < $maxWord) {
-                    $word .= chr($this->lowerAscii($byte));
+                    $word .= chr($lower);
                 }
                 continue;
             }
@@ -60,7 +44,7 @@ final class WordCounter
 
         $entries = [];
         foreach ($counts as $entryWord => $count) {
-            $entries[] = new Entry((string) $entryWord, $count);
+            $entries[] = new Entry($entryWord, $count);
         }
 
         usort(
@@ -78,25 +62,7 @@ final class WordCounter
         return new Result($total, count($counts), array_slice($entries, 0, $top));
     }
 
-    /**
-     * @param int<0, 255> $byte
-     */
-    private function isLetter(int $byte): bool
-    {
-        return ($byte >= 65 && $byte <= 90) || ($byte >= 97 && $byte <= 122);
-    }
-
-    /**
-     * @param int<0, 255> $byte
-     *
-     * @return int<0, 255>
-     */
-    private function lowerAscii(int $byte): int
-    {
-        return $byte >= 65 && $byte <= 90 ? $byte + 32 : $byte;
-    }
-
-    private function normalizeMaxWord(int $value): int
+    private static function normalizeMaxWord(int $value): int
     {
         if ($value === 0) {
             return self::ORACLE_DEFAULT_MAX_WORD;

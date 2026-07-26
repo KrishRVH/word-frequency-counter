@@ -141,10 +141,16 @@ contains
       call get_command_argument(index, length=length, status=status)
       if (status > 0) call fail(usage)
 
-      allocate (character(len=length) :: value)
       if (length > 0) then
-         call get_command_argument(index, value=value, status=status)
-         if (status /= 0) call fail(usage)
+         block
+            character(len=length) :: buffer
+
+            call get_command_argument(index, value=buffer, status=status)
+            if (status /= 0) call fail(usage)
+            value = buffer
+         end block
+      else
+         value = ''
       end if
    end function command_argument
 
@@ -397,16 +403,16 @@ contains
       class(word_map_t), intent(inout) :: self
       integer, intent(in) :: new_capacity
 
-      type(slot_t), allocatable :: old_slots(:)
+      type(word_map_t) :: old
       integer :: index
 
-      call move_alloc(self%slots, old_slots)
+      call move_alloc(self%slots, old%slots)
       allocate (self%slots(new_capacity))
       self%used = 0
 
-      do index = 1, size(old_slots)
-         if (old_slots(index)%used) then
-            call self%insert_count(old_slots(index)%word, old_slots(index)%count)
+      do index = 1, size(old%slots)
+         if (old%slots(index)%used) then
+            call self%insert_count(old%slots(index)%word, old%slots(index)%count)
          end if
       end do
    end subroutine map_resize
@@ -686,30 +692,3 @@ contains
    end function mix_u64
 
 end module wordcount_render
-
-program wordcount_fortran
-   use, intrinsic :: iso_fortran_env, only: int8, int64
-   use wordcount_counter, only: count_words, result_t
-   use wordcount_io, only: read_file_bytes
-   use wordcount_options, only: options_t, parse_options
-   use wordcount_render, only: render_bench, render_json, render_text
-   implicit none
-
-   integer(int8), allocatable :: bytes(:)
-   type(options_t) :: options
-   type(result_t) :: result
-
-   call parse_options(options)
-   call read_file_bytes(options%path, bytes)
-
-   if (options%bench_runs > 0_int64) then
-      call render_bench(bytes, options)
-   else
-      result = count_words(bytes, options%top, options%max_word)
-      if (options%json) then
-         call render_json(result)
-      else
-         call render_text(result)
-      end if
-   end if
-end program wordcount_fortran

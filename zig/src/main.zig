@@ -121,32 +121,28 @@ fn parseArgs(args: []const []const u8) !Options {
     return options;
 }
 
-/// Mutates bytes by lowercasing retained words. The result's entries use
-/// allocator-backed storage and its words alias bytes, so both must remain alive
-/// while the result is used; bytes may safely be counted again.
-fn countBytes(allocator: Allocator, bytes: []u8, top: usize, max_word: usize) !Result {
+fn countBytes(allocator: Allocator, bytes: []const u8, top: usize, max_word: usize) !Result {
     var counts: std.StringHashMapUnmanaged(u64) = .empty;
     defer counts.deinit(allocator);
     try counts.ensureTotalCapacity(allocator, estimatedUniqueWords(bytes));
 
     var total: u64 = 0;
-    var start: usize = 0;
     var length: usize = 0;
     const word_limit = normalizeMaxWord(max_word);
+    var word_buffer: [max_word_limit]u8 = undefined;
 
-    for (bytes, 0..) |byte, index| {
+    for (bytes) |byte| {
         if (std.ascii.isAlphabetic(byte)) {
             if (length < word_limit) {
-                if (length == 0) start = index;
-                bytes[index] = std.ascii.toLower(byte);
+                word_buffer[length] = std.ascii.toLower(byte);
                 length += 1;
             }
         } else if (length > 0) {
-            try bump(allocator, &counts, bytes[start .. start + length], &total);
+            try bump(allocator, &counts, word_buffer[0..length], &total);
             length = 0;
         }
     }
-    if (length > 0) try bump(allocator, &counts, bytes[start .. start + length], &total);
+    if (length > 0) try bump(allocator, &counts, word_buffer[0..length], &total);
 
     const entries = try allocator.alloc(Entry, counts.count());
     var iterator = counts.iterator();
@@ -169,8 +165,13 @@ fn bump(
     word: []const u8,
     total: *u64,
 ) !void {
-    const gop = try counts.getOrPut(allocator, word);
-    gop.value_ptr.* = if (gop.found_existing) gop.value_ptr.* + 1 else 1;
+    if (counts.getPtr(word)) |count| {
+        count.* += 1;
+    } else {
+        const owned = try allocator.dupe(u8, word);
+        errdefer allocator.free(owned);
+        try counts.put(allocator, owned, 1);
+    }
     total.* += 1;
 }
 
@@ -186,7 +187,7 @@ fn normalizeMaxWord(value: usize) usize {
 
 fn countChecksum(
     allocator: Allocator,
-    bytes: []u8,
+    bytes: []const u8,
     top: usize,
     max_word: usize,
 ) !u32 {
@@ -232,7 +233,7 @@ fn renderBench(
     writer: anytype,
     io: Io,
     allocator: Allocator,
-    bytes: []u8,
+    bytes: []const u8,
     options: Options,
 ) !void {
     for (0..options.bench_warmups) |_| {

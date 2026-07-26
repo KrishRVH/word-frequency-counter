@@ -1,39 +1,22 @@
 # Word Frequency Counter
 
-One ASCII word-frequency problem implemented across fourteen languages. The point
-is not to chase every last cycle; it is to compare small, idiomatic,
-well-policed implementations that all obey the same byte-level contract.
+This repository solves one deliberately narrow ASCII word-frequency problem in
+20 languages. Nineteen implementations are executable CLIs; the twentieth is a
+pure Roc package. Clarity comes first and performance second, with each
+implementation following its matching profile in `~/dev/personal/standards`.
 
-The implementations are meant to be good examples of each language, not
-translations forced through one architecture. Prefer the smallest clear shape
-that feels natural in that language. The shared harness carries the edge-case
-correctness pressure so the language directories can stay readable and useful
-as reference code.
-
-The correctness source of truth is
-`~/dev/personal/tokenfreq-c99`. This repository builds or invokes that C99
-oracle and compares every implementation against its JSON output.
-
-The benchmark only needs the oracle executable, but the binary is intentionally
-not vendored here. It is generated, platform-specific, and easy to let drift
-from `tokenfreq-c99`; keep the source repo as the authority and override the
-binary path with `WFC_ORACLE` when needed.
+Correctness comes from `~/dev/personal/tokenfreq-c99`. Its generated binary is
+not vendored here. Set `WFC_ORACLE` only if that checkout lives somewhere else.
 
 ## Contract
 
-Input is a raw byte stream. A word is a maximal run of ASCII letters:
-
-```text
-A-Z or a-z
-```
-
-All other bytes are separators: whitespace, punctuation, digits, NUL bytes, and
-non-ASCII bytes. Words are lowercased with ASCII byte logic only. Results are
+Input is a raw byte stream. A word is a maximal run of `A-Z` or `a-z`; every
+other byte is a separator. Words are lowercased using ASCII byte rules and
 sorted by count descending, then word ascending.
 
-Every implementation accepts:
+Every executable accepts:
 
-```sh
+```text
 --json
 --top N
 --top=N
@@ -42,11 +25,8 @@ Every implementation accepts:
 <file>
 ```
 
-`--top` must be greater than zero. `--max-word` follows the oracle: `0` means
-the oracle default of `64`, and every other nonnegative value clamps into
-`[4, 1024]`.
-
-The local JSON shape is:
+`--top` must be positive. `--max-word=0` selects the oracle default of 64; all
+other nonnegative values clamp to `[4, 1024]`. JSON results have this shape:
 
 ```json
 {
@@ -56,138 +36,166 @@ The local JSON shape is:
 }
 ```
 
-The oracle emits a slightly different shape, so `scripts/bench.ts` normalizes
-`tokenfreq-c99` before comparison.
+## Fairness
 
-## Fairness Rules
+To keep the comparison honest, every implementation reads the file once, scans
+and lowercases ASCII words, counts everything, materializes every unique entry,
+fully sorts the result, and truncates only afterward. Implementations use
+ordinary standard containers and default hashing. C and Fortran carry small
+self-contained open-addressed tables because their standard libraries do not
+supply maps. Haskell keeps `Data.Map.Strict` instead of adding a hash-map
+package.
 
-The benchmark is a comparison of clear, idiomatic implementations, not a contest
-to smuggle in each language's most specialized data structure. The shared shape
-is:
+Input-derived capacity hints are allowed. Custom hashers, top-N selection,
+SIMD, mmap, threads, PGO, LTO-only profiles, `-march=native`, fixture shortcuts,
+and benchmark-only algorithms are not.
 
-1. Read the input as bytes.
-2. Scan ASCII words and lowercase with byte logic.
-3. Count every word.
-4. Materialize every unique entry.
-5. Fully sort by count descending, then word ascending.
-6. Truncate only after sorting.
+The harness measures two different costs:
 
-Languages with standard hash maps or dictionary-like containers use their
-ordinary standard containers and default hash/equality behavior. C and Fortran
-are the native exceptions: neither language has a standard hash map, so each may
-keep a small self-contained table, but those tables are treated as local
-stand-ins for the standard maps rather than a license for specialized benchmark
-machinery.
+- Warm-task timing reads the fixture once, warms the counting path, validates a
+  stable checksum, and reports the median and worst of five independent samples.
+  Each default sample performs 3 warmups and 10 measured iterations.
+- CLI timing interleaves five whole-process samples with an empty-input baseline
+  and reports the median and worst sample after subtracting that startup
+  baseline.
 
-Modest capacity hints are allowed when they are shared and input-derived:
-implementations with standard capacity APIs may estimate unique words from input
-length, reserve the current-word buffer up to `min(max_word, 64)`, and reserve
-the final entry list once the unique count is known. Avoid custom hashers,
-alternate hash-map libraries, top-N heaps or selection, SIMD, mmap, threads,
-LTO-only benchmark profiles, PGO, `-march=native`, release-profile tweaks that
-are not mirrored across comparable compiled languages, or fixture-specific
-shortcuts.
-
-The harness times built release artifacts when a language normally produces one,
-uses the same `--top` and `--max-word` for every timing, and sorts the summary by
-the primary corpus fixture's warm-task mean: an already-running, in-process proxy
-where the fixture is read once, the counting function is warmed, and repeated
-count batches are timed inside the language runtime. The warm-task checksum is a
-stable FNV-1a-style rolling hash over `total`, `unique`, each top word's bytes,
-and each top count; repeated timed runs are mixed into a non-canceling aggregate
-that the harness validates for every timing sample. Corpus summaries print
-warm-task means for each fixture and the primary fixture's adjusted CLI time.
-Single-file summaries also show raw CLI and startup timings because
-runtime-heavy languages can spend most of their wall time before the scanner
-does meaningful work.
-
-The per-language CLIs also accept internal `--bench-runs N` and
-`--bench-warmups N` flags. They are intentionally omitted from the public
-contract above; they exist only so `scripts/bench.ts` can measure the warm-task
-case without adding public wrapper scripts or per-language test surfaces.
-
-Two current caveats are explicit policy choices. Haskell keeps
-`Data.Map.Strict` as a standard-library caveat instead of adding
-`unordered-containers`. Lua's warm-task timer uses standard Lua's `os.clock`, so
-that column is CPU-time-based for Lua; use its adjusted CLI timing for the safer
-cross-language wall-time comparison.
+Lua is the one timing caveat: its warm path uses the standard `os.clock`, so the
+adjusted CLI result is the safer wall-clock comparison.
 
 ## Implementations
 
-| Language   | Shape                                  | Commentary                                                                                                                                                                                                                                            |
-| ---------- | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| C23        | `c/` library plus CLI                  | The native exception for C's missing standard map: byte scanner, small open-addressed table, explicit allocation and cleanup.                                                                                                                         |
-| C++26      | single CLI                             | Modern standard-library version: `std::from_chars`, `std::unordered_map`, vectors, and ranges sorting without turning the solution into a framework.                                                                                                  |
-| Rust 2024  | library plus CLI                       | Ownership-conscious core over `&[u8]`, ordinary `HashMap`, borrowed `Cow<[u8]>` keys for already-lowercase words, byte-backed result entries, and explicit render functions. The `case-fold-mix` fixture keeps that representation advantage visible. |
-| Go         | `internal/wordcount` plus command      | Reads bytes with `io.ReadAll`, scans directly, and keeps the package boundary natural Go. The code stays deliberately boring.                                                                                                                         |
-| JavaScript | ESM CLI with `checkJs`                 | Uses `Uint8Array`, `Map`, and explicit ASCII helpers. The implementation is readable, with string accumulation still visible once startup is removed from the benchmark.                                                                              |
-| PHP        | Composer package plus thin bin wrapper | Strict types, PHPCS, and PHPStan strict rules without architecture or refactor tooling. The code stays more formal than the smaller dynamic implementations, but the gate is now sized to this benchmark.                                             |
-| C#         | .NET console app                       | Reads bytes with `File.ReadAllBytes`, carries scanner state in an accumulator, and benchmarks the built Release app directly.                                                                                                                         |
-| Lua        | module plus executable script          | Compact table-based scanner with a small CLI wrapper. It is a good example of Lua being direct without pretending to be a static language.                                                                                                            |
-| Kotlin     | Gradle JVM app                         | Uses a byte array, `StringBuilder`, unsigned counts, and locked Gradle tooling. The warm-task columns compare scanner work, while the adjusted CLI column keeps JVM startup cost visible.                                                             |
-| Elixir     | Mix escript                            | Builds a prod escript and expresses the scanner as a reducer over bytes with immutable maps. It is elegant BEAM code for the problem, not a claim that BEAM is ideal for tiny byte-counting CLIs.                                                     |
-| Zig        | single native CLI                      | Explicit allocator ownership, scoped arena lifetime, `StringHashMap`, and low ceremony. It makes the byte-level mechanics visible without C's manual cleanup surface.                                                                                 |
-| Haskell    | GHC-built CLI                          | Strict `ByteString` fold into `Data.Map.Strict`, with pure parse/render/counting pieces. `Map` is a deliberate standard-library caveat rather than an extra dependency for a hash table.                                                              |
-| Fortran    | single native CLI                      | Modern free-form Fortran with `iso_fortran_env`, stream byte reads, explicit modules, a local open-addressed table, and standard command-line/time intrinsics.                                                                                        |
-| SPARK/Ada  | Alire/GPRbuild CLI                     | Proved SPARK-mode ASCII and checksum helpers, strict GNAT style/proof gates, and a narrow full-Ada boundary around standard containers, file I/O, rendering, and timing.                                                                              |
+| Language   | Directory     | Idiomatic shape                                                             |
+| ---------- | ------------- | --------------------------------------------------------------------------- |
+| C23        | `c/`          | Library and CLI with explicit ownership and a compact local hash table      |
+| C++23      | `cpp/`        | `std::unordered_map`, `std::from_chars`, vectors, and ranges sorting        |
+| Rust 2024  | `rust/`       | Borrowed byte scanning, ordinary `HashMap`, and explicit rendering          |
+| Go         | `go/`         | Small internal package over byte slices and standard collections            |
+| JavaScript | `javascript/` | Checked ESM using `Uint8Array`, `Map`, and native argument parsing          |
+| TypeScript | `typescript/` | Pure counting core with Effect at file-I/O and failure boundaries           |
+| PHP        | `php/`        | Strict Composer package with immutable result values and a thin bin wrapper |
+| C#         | `csharp/`     | .NET console app with a focused parser and scanner accumulator              |
+| Lua        | `lua/`        | Direct module and executable script over ordinary tables                    |
+| Kotlin     | `kotlin/`     | Strict Gradle JVM app using byte arrays and Kotlin collections              |
+| Elixir     | `elixir/`     | Mix escript and immutable byte reducer                                      |
+| Zig        | `zig/`        | Native build, explicit allocator ownership, and `StringHashMap`             |
+| Haskell    | `haskell/`    | Cabal app with strict `ByteString` folds and pure core functions            |
+| Fortran    | `fortran/`    | fpm app, stream-byte input, modules, and a local hash table                 |
+| SPARK/Ada  | `spark/`      | Proved scanner/checksum core with an Ada I/O and rendering boundary         |
+| GDScript   | `gdscript/`   | Headless Godot script using packed bytes and `Dictionary`                   |
+| Odin       | `odin/`       | Native CLI using the core allocator and standard map                        |
+| Python     | `python/`     | Typed package-style CLI using a dictionary and byte iteration               |
+| Shell      | `shell/`      | Strict Bash pipeline built from standard text tools                         |
+| Roc        | `roc/`        | Pure checked package; see the non-executable exception below                |
+
+## Toolchains
+
+These are the language-facing toolchains used for this snapshot:
+
+| Stack      | Snapshot toolchain                                          |
+| ---------- | ----------------------------------------------------------- |
+| C / C++    | Clang 22.1.8, CMake 4.3.4                                   |
+| Rust       | Rust 1.97.1, cargo-deny 0.20.2                              |
+| Go         | Go 1.26.5                                                   |
+| JavaScript | Node 26.5.0, Bun 1.3.14, TypeScript 7.0.2 checks            |
+| TypeScript | Bun 1.3.14, TypeScript 6.0.3, Effect 3.22.0                 |
+| PHP        | PHP 8.5.8, Composer 2.10.2                                  |
+| C#         | .NET SDK 10.0.302                                           |
+| Lua        | Lua 5.5.0                                                   |
+| Kotlin     | Kotlin 2.4.10, Java 26.0.2, Gradle 9.6.1                    |
+| Elixir     | Elixir 1.20.2, Erlang/OTP 29.0.3                            |
+| Zig        | Zig 0.16.0                                                  |
+| Haskell    | GHC 9.14.1, Cabal 3.16.1.0                                  |
+| Fortran    | Flang 22.1.8 semantic gate; GFortran 15.2.0 benchmark build |
+| SPARK/Ada  | GNAT/GNATprove 16.1 through Alire 2.1.1                     |
+| GDScript   | Godot 4.7.1, Python 3.12.13 tooling                         |
+| Odin       | Odin `dev-2026-07a`                                         |
+| Python     | CPython 3.14.6                                              |
+| Shell      | Host GNU Bash 5.3.9 (not mise-managed)                      |
+| Roc        | immutable nightly `2026-07-25-b6cdced`                      |
+
+Every mise-managed runtime and support tool is pinned in
+`.config/mise/config.toml` and `.config/mise/mise.lock`, and every resolved pin
+matches the registry's latest version. The only odd-looking `mise outdated`
+entry is boringlint: the Go backend records the installed tag as `v0.9.5`,
+while the registry normalizes the same version to `0.9.5`, so mise reports no
+available bump. Benchmark output includes the complete active mise matrix,
+host, timestamp, git revision, and sampling parameters. Bash is the recorded
+host-runtime exception.
+
+Four ecosystems need special handling:
+
+- Roc has no numbered stable compiler release. The exact immutable nightly is
+  the standards profile's available reproducible choice. Its package passes
+  `roc check`, but the current Roc platform boundary cannot produce a compatible
+  CLI, so Roc is neither oracle-validated nor benchmarked.
+- Odin publishes dated development releases rather than stable semantic
+  versions; `dev-2026-07a` is the latest available release.
+- The Effect-based TypeScript profile uses TypeScript 6.0.3, the latest stable
+  version mutually supported by its current `typescript-eslint` and
+  `@effect/language-service` stack. Moving it to TypeScript 7 requires the
+  separate `@effect/tsgo` integration.
+- The current mise/conda GFortran package stops at 15.2.0. Flang 22.1.8 supplies
+  the latest stable Fortran semantic compilation gate, while GFortran remains
+  the linked executable used for validation and timing because the conda Flang
+  package lacks its link-time runtime library.
+
+Detekt 2.0.0-alpha.5 is another upstream prerelease, but it is a support tool,
+not a language runtime. The Kotlin standards profile pins it as the analyzer.
 
 ## Benchmark Corpus
 
-The default benchmark is a deterministic generated corpus, not a single
-representative text file. That keeps the table honest about size and
-cardinality effects without committing generated fixtures to git.
+The default corpus is generated deterministically under `build/fixtures`.
 
-| Fixture         |    Size | Role    | What it exposes                                      |
-| --------------- | ------: | ------- | ---------------------------------------------------- |
-| `tiny-mix`      |   4 KiB | smoke   | Startup noise and fixed overheads                    |
-| `small-mix`     |  64 KiB | cache   | Scanner and map behavior on a still-small input      |
-| `medium-mix`    | 512 KiB | primary | Mixed repeated and unique words; headline sort order |
-| `unique-sort`   | 512 KiB | stress  | Mostly unique words, allocation pressure, full sort  |
-| `case-fold-mix` | 512 KiB | stress  | Uppercase-heavy repeats and ASCII normalization cost |
+| Fixture         |   Bytes | Role                                   |
+| --------------- | ------: | -------------------------------------- |
+| `tiny-mix`      |   4,100 | Startup-sensitive smoke input          |
+| `small-mix`     |  65,542 | Cache-friendly mixed input             |
+| `medium-mix`    | 524,299 | Primary mixed repeated/unique workload |
+| `unique-sort`   | 524,294 | Allocation and full-sort stress        |
+| `case-fold-mix` | 524,295 | ASCII normalization stress             |
 
-The `stress` corpus adds `repeated-scan` and `long-clamp` for low-cardinality
-throughput and max-word truncation pressure. Use `--fixture=...` when you want a
-one-off file instead of the generated corpus.
+The `stress` corpus adds repeated-scan and long-word clamp cases.
 
 ## Benchmark Snapshot
 
-Short local corpus sanity run:
+Recorded at `2026-07-26T02:32:40.616Z` on Linux
+`6.18.33.1-microsoft-standard-WSL2` x64, AMD Ryzen 9 9950X3D, 24 logical
+CPUs, revision `40e5f18+dirty`. Protocol: 5 warm samples, 10 measured
+iterations and 3 warmups per sample, plus 5 CLI samples. The complete toolchain
+matrix emitted by the run includes all mise-managed support tools; the table
+above summarizes its language-facing subset. Because the revision is dirty,
+this snapshot is local worktree evidence rather than a commit-reproducible
+artifact; rerun it after committing for an artifact-grade record.
 
-```sh
-mise run bench -- --runs=2 --warmups=1 --warm-task-samples=1 --warm-task-runs=10 --warm-task-warmups=3
-```
+| implementation | tiny median ms | small median ms | medium median ms | unique median ms | case-fold median ms | medium worst-of-5 ms | medium MB/s | adjusted CLI median ms | adjusted CLI worst-of-5 ms |
+| -------------- | -------------: | --------------: | ---------------: | ---------------: | ------------------: | -------------------: | ----------: | ---------------------: | -------------------------: |
+| rust           |          0.012 |           0.202 |            1.773 |            1.650 |               1.888 |                1.872 |       282.1 |                  2.583 |                      2.723 |
+| zig            |          0.010 |           0.295 |            2.733 |            3.782 |               2.337 |                2.734 |       182.9 |                  3.532 |                      4.054 |
+| cpp            |          0.014 |           0.301 |            2.763 |            4.335 |               2.318 |                2.783 |       181.0 |                  3.720 |                      3.827 |
+| c              |          0.014 |           0.305 |            2.857 |            4.685 |               2.517 |                2.941 |       175.0 |                  3.952 |                      4.205 |
+| go             |          0.025 |           0.441 |            3.936 |            4.346 |               3.292 |                4.012 |       127.0 |                  4.187 |                      4.630 |
+| fortran        |          0.026 |           0.498 |            4.670 |           10.346 |               5.207 |                4.691 |       107.1 |                  6.429 |                      6.602 |
+| kotlin         |          0.495 |           1.640 |            5.416 |            6.430 |               4.894 |                5.725 |        92.3 |                 43.921 |                     46.650 |
+| odin           |          0.032 |           0.619 |            5.694 |            8.971 |               4.501 |                5.726 |        87.8 |                  6.929 |                      7.191 |
+| csharp         |          0.081 |           1.259 |            7.927 |            7.167 |               6.126 |                7.970 |        63.1 |                 17.022 |                     18.522 |
+| haskell        |          0.127 |           0.883 |            9.236 |            9.777 |              10.067 |                9.267 |        54.1 |                 13.318 |                     13.848 |
+| javascript     |          0.177 |           1.382 |           11.655 |           12.959 |               9.749 |               11.715 |        42.9 |                 20.484 |                     21.841 |
+| typescript     |          0.307 |           2.695 |           13.494 |           13.694 |              12.057 |               14.080 |        37.1 |                 47.649 |                     69.991 |
+| spark          |          0.121 |           1.956 |           16.730 |           19.981 |              14.222 |               16.896 |        29.9 |                 18.505 |                     20.325 |
+| php            |          0.161 |           2.804 |           25.157 |           31.274 |              22.846 |               25.489 |        19.9 |                 26.860 |                     28.236 |
+| python         |          0.219 |           3.498 |           29.532 |           23.420 |              24.135 |               30.319 |        16.9 |                 31.334 |                     32.718 |
+| lua            |          0.404 |           6.482 |           53.950 |           55.437 |              50.446 |               56.869 |         9.3 |                 58.816 |                     59.541 |
+| gdscript       |          0.407 |           7.466 |           66.326 |           94.971 |              59.070 |               66.990 |         7.5 |                102.694 |                    103.151 |
+| elixir         |          0.173 |           2.710 |           71.706 |           68.159 |              60.266 |               72.111 |         7.0 |                 71.667 |                     73.847 |
+| shell          |         15.915 |         203.272 |         1706.704 |         1930.415 |            1654.128 |             1719.218 |         0.3 |               1828.373 |                   1850.610 |
 
-| implementation | tiny-mix warm ms | small-mix warm ms | medium-mix warm ms | unique-sort warm ms | case-fold-mix warm ms | medium-mix MB/s | medium-mix adjusted CLI ms |
-| -------------- | ---------------: | ----------------: | -----------------: | ------------------: | --------------------: | --------------: | -------------------------: |
-| rust           |            0.012 |             0.212 |              1.800 |               1.932 |                 1.887 |           277.8 |                      2.746 |
-| zig            |            0.009 |             0.290 |              2.688 |               3.761 |                 2.266 |           186.0 |                      3.115 |
-| cpp            |            0.014 |             0.300 |              2.800 |               4.369 |                 2.391 |           178.6 |                      3.685 |
-| c              |            0.014 |             0.305 |              2.949 |               4.686 |                 2.563 |           169.5 |                      4.121 |
-| go             |            0.025 |             0.467 |              4.500 |               4.948 |                 3.790 |           111.1 |                      5.119 |
-| fortran        |            0.026 |             0.499 |              4.670 |               9.459 |                 4.948 |           107.1 |                      6.074 |
-| kotlin         |            0.492 |             1.395 |              5.462 |               6.069 |                 4.639 |            91.5 |                     36.075 |
-| csharp         |            0.082 |             1.268 |              7.925 |               7.208 |                 6.036 |            63.1 |                     19.666 |
-| haskell        |            0.247 |             0.903 |              9.215 |              10.075 |                10.379 |            54.3 |                     12.534 |
-| javascript     |            0.169 |             1.434 |             12.101 |              12.898 |                10.766 |            41.3 |                     22.961 |
-| spark          |            0.113 |             1.972 |             17.523 |              20.864 |                13.348 |            28.5 |                     18.801 |
-| php            |            0.271 |             4.208 |             37.070 |              43.352 |                35.655 |            13.5 |                     37.188 |
-| lua            |            0.695 |             7.998 |             65.662 |              65.711 |                62.715 |             7.6 |                     69.010 |
-| elixir         |            0.174 |             2.851 |             74.849 |              69.473 |                64.159 |             6.7 |                     76.242 |
-
-Interpret the `warm ms` columns as the closest benchmark here to an
-already-running service or application doing this task in the middle of a larger
-workload. They do not include process startup or file reads. The `medium-mix
-MB/s` column is derived from the `medium-mix warm ms` value so scaling is easier
-to read. Interpret `adjusted CLI ms` as whole-command timing after subtracting
-the empty-fixture command baseline, not as the primary in-process result. The
-harness builds first, validates every benchmark fixture and generated edge-case
-fixture against `tokenfreq-c99`, runs warmups for every implementation, then
-times interleaved samples of each benchmark fixture and an empty-fixture
-invocation with the same command options.
+Use the warm medians for the primary scanner comparison. The adjusted CLI
+columns show whole-command wall time after subtracting the empty-input process
+baseline.
 
 ## Commands
 
-Everything public goes through `mise`:
+Mise is the supported developer interface:
 
 ```sh
 mise run tasks
@@ -197,82 +205,31 @@ mise run fmt:check
 mise run lint
 mise run build
 mise run validate
-mise run bench -- --runs=10
+mise run bench
 mise run check:local
 mise run check
 mise run clean
 ```
 
-Useful benchmark options:
+Useful benchmark overrides include `--corpus=stress`, `--fixture=PATH`,
+`--runs=N`, `--warmups=N`, `--warm-task-samples=N`, `--warm-task-runs=N`, and
+`--warm-task-warmups=N`.
 
-```sh
-mise run bench -- --corpus=default --top=10 --max-word=1024 --runs=5 --warmups=3 --warm-task-samples=3 --warm-task-runs=50 --warm-task-warmups=10
-mise run bench -- --corpus=stress --runs=3 --warm-task-runs=20
-mise run bench -- --fixture=fixtures/spec.txt --runs=5
-mise run validate
-```
-
-The default `mise run bench` corpus is generated under
-`build/fixtures/bench-*.txt`. For compatibility, the primary corpus fixture is
-also written to `build/fixtures/benchmark.txt`. Use `--fixture=fixtures/spec.txt`
-when you want the tiny contract fixture instead of the corpus.
-
-The mise environment sets `WFC_CORPUS=default`. `WFC_TOP`, `WFC_MAX_WORD`,
-`WFC_WARMUPS`, `WFC_WARM_TASK_SAMPLES`, `WFC_WARM_TASK_RUNS`,
-`WFC_WARM_TASK_WARMUPS`, and `WFC_ORACLE` remain environment-level defaults for
-local runs. `WFC_FIXTURE` is still accepted as a legacy custom-fixture default,
-but only when `WFC_CORPUS` is unset; explicit `--fixture=...` and `--corpus=...`
-flags are clearer for new runs.
-
-There are intentionally no per-language test suites. Correctness is the oracle
-comparison: `mise run validate` checks every benchmark fixture, or the supplied
-custom fixture, plus a small matrix of generated edge-case fixtures against
-`tokenfreq-c99`. That matrix includes separated and equals CLI flag forms for
-`--top` and `--max-word`, including max-word clamp cases. There is also
-intentionally no CI, no Dagger setup, and no GitHub workflow surface.
+There are no separate per-language test suites or CI-only tasks. Instead,
+`mise run validate` checks all 19 executable CLIs against `tokenfreq-c99` over
+the benchmark corpus and generated edge cases, including separated and
+equals-style options and max-word clamps.
 
 ## Standards Surface
 
-The repository is strict by design:
+`mise run fmt:check` exercises every formatter. `mise run lint` applies strict
+compiler warnings and the repository profiles for Clang, Clippy with
+`cargo deny`, Go module verification with
+boringlint/golangci-lint/govulncheck, ESLint/TypeScript/Effect diagnostics,
+Composer/PHPCS/PHPStan/PHPMD/Rector, .NET analyzers, StyLua, Detekt,
+Credo/Dialyzer/audits, Zig checks, HLint/GHC/Cabal, Findent/Fortls and both
+Fortran compilers, ShellCheck, Python type/security/audit tools, Godot linting,
+Odin vetting, Roc checking, and SPARK proof.
 
-| Stack      | Gate                                                                                      |
-| ---------- | ----------------------------------------------------------------------------------------- |
-| C / C++    | CMake, Clang warnings as errors, sanitizers in debug preset, `clang-format`, `clang-tidy` |
-| Rust       | `cargo fmt`, Clippy with warnings denied                                                  |
-| Go         | `gofumpt`, `go vet`, `golangci-lint`, `govulncheck`                                       |
-| JavaScript | Prettier, ESLint, TypeScript `checkJs`, Node syntax check                                 |
-| PHP        | Composer Normalize, PHPCS, PHPStan strict rules                                           |
-| C#         | `dotnet format`, warnings as errors                                                       |
-| Lua        | StyLua, Luacheck, Lua Language Server diagnostics                                         |
-| Kotlin     | ktlint, Detekt, Gradle dependency locking and verification metadata                       |
-| Elixir     | `mix format`, Credo strict mode, warnings as errors                                       |
-| Zig        | `zig fmt`, compile check                                                                  |
-| Haskell    | Ormolu, HLint, GHC `-Wall -Werror`, Cabal check/build                                     |
-| Fortran    | Findent, GNU Fortran `-std=f2018`, warnings as errors                                     |
-| SPARK/Ada  | Alire-pinned GNAT/GPRbuild/GNATprove/GNATformat, warnings as errors, proof gate           |
-| Benchmark  | Bun/TypeScript runner validates every implementation against the oracle                   |
-
-## Layout
-
-```text
-c/            C23 library and CLI
-cpp/          C++26 CLI
-rust/         Rust crate
-go/           Go module
-javascript/   Node ESM implementation
-php/          Composer package and executable wrapper
-csharp/       .NET console app
-lua/          Lua module and script
-kotlin/       Gradle JVM app
-elixir/       Mix escript
-zig/          Zig CLI
-haskell/      GHC/Cabal app
-fortran/      GNU Fortran CLI
-spark/        SPARK/Ada Alire project
-scripts/      Bun benchmark and oracle-validation runner
-fixtures/     small checked-in fixture
-```
-
-Generated binaries, dependencies, caches, and reports are ignored. GitHub
-Linguist is configured to count maintained implementation source instead of
-docs, lockfiles, fixtures, vendored dependencies, and build output.
+Generated binaries, dependencies, caches, and reports remain ignored and are
+removed by `mise run clean`.

@@ -192,14 +192,15 @@ procedure Wordcount_Spark with SPARK_Mode => Off is
          Bytes  :
            Ada.Streams.Stream_Element_Array
              (1 .. Ada.Streams.Stream_Element_Offset (Length));
-         Last   : Ada.Streams.Stream_Element_Offset;
+         Last   : Ada.Streams.Stream_Element_Offset :=
+           Ada.Streams.Stream_Element_Offset'Pred (Bytes'First);
       begin
          if Length > 0 then
             Ada.Streams.Stream_IO.Read (File, Bytes, Last);
          end if;
 
          Ada.Streams.Stream_IO.Close (File);
-         return Bytes;
+         return Bytes (Bytes'First .. Last);
       end;
    exception
       when others =>
@@ -214,11 +215,10 @@ procedure Wordcount_Spark with SPARK_Mode => Off is
      (Bytes : Ada.Streams.Stream_Element_Array; State : Options)
       return Interfaces.Unsigned_32
    is
-      Result : Wordcount.Result :=
+      Result : constant Wordcount.Result :=
         Wordcount.Count_Bytes (Bytes, State.Top, State.Max_Word);
       Value  : constant Interfaces.Unsigned_32 := Wordcount.Checksum (Result);
    begin
-      Wordcount.Release (Result);
       return Value;
    end Count_Checksum;
 
@@ -263,7 +263,7 @@ begin
       Render_Bench (Bytes, State);
    else
       declare
-         Result : Wordcount.Result :=
+         Result : constant Wordcount.Result :=
            Wordcount.Count_Bytes (Bytes, State.Top, State.Max_Word);
       begin
          if State.JSON then
@@ -271,8 +271,6 @@ begin
          else
             Wordcount.Render_Text (Result);
          end if;
-
-         Wordcount.Release (Result);
       end;
    end if;
 exception

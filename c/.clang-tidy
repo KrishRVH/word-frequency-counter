@@ -1,0 +1,12 @@
+Checks: >
+  -*,
+  bugprone-*,
+  cert-*,
+  clang-analyzer-*,
+  performance-*,
+  portability-*,
+  readability-misleading-indentation,
+  -bugprone-easily-swappable-parameters
+WarningsAsErrors: 'bugprone-*,clang-analyzer-*'
+HeaderFilterRegex: '^(include|src)/.*\.(c|h)$'
+FormatStyle: none

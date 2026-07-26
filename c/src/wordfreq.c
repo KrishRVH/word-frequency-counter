@@ -154,7 +154,7 @@ static int table_insert(Table *table, const unsigned char *bytes, size_t len)
 {
     uint64_t hash = hash_word(bytes, len);
 
-    if (table->cap == 0 || (table->len + 1u) * 10u >= table->cap * 7u) {
+    if (table->cap == 0) {
         if (table_grow(table) != 0) {
             return -1;
         }
@@ -171,6 +171,17 @@ static int table_insert(Table *table, const unsigned char *bytes, size_t len)
         }
 
         index = (index + 1u) & (table->cap - 1u);
+    }
+
+    if ((table->len + 1u) * 10u >= table->cap * 7u) {
+        if (table_grow(table) != 0) {
+            return -1;
+        }
+
+        index = (size_t)hash & (table->cap - 1u);
+        while (table->slots[index].word != NULL) {
+            index = (index + 1u) & (table->cap - 1u);
+        }
     }
 
     char *word = malloc(len + 1u);
@@ -246,6 +257,10 @@ int wf_count_bytes(const unsigned char *data,
     Table table = { 0 };
     size_t cursor = 0;
     size_t expected = estimated_unique_words(len);
+
+    if (result == NULL || (data == NULL && len > 0u)) {
+        return -1;
+    }
 
     *result = (WfResult){ 0 };
     max_word = normalize_max_word(max_word);

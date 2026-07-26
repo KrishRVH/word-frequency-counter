@@ -1,3 +1,7 @@
+//! Case-insensitive ASCII word counting and rendering.
+
+#![warn(missing_docs)]
+
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -11,19 +15,27 @@ const MIN_WORD: usize = 4;
 type WordMap<'a> = HashMap<Cow<'a, [u8]>, u64>;
 type CountedWord<'a> = (Cow<'a, [u8]>, u64);
 
+/// A normalized word and its frequency.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Entry<'a> {
+    /// The lowercase ASCII word.
     pub word: Cow<'a, [u8]>,
+    /// The number of occurrences.
     pub count: u64,
 }
 
+/// Aggregate counts and the requested highest-frequency entries.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WordCounts<'a> {
+    /// The total number of words.
     pub total: u64,
+    /// The number of distinct normalized words.
     pub unique: usize,
+    /// Entries ordered by descending frequency and lexical ties.
     pub top: Vec<Entry<'a>>,
 }
 
+/// Count ASCII words, retaining at most `limit` ranked entries.
 #[must_use]
 pub fn count_words(bytes: &[u8], limit: usize, max_word: usize) -> WordCounts<'_> {
     let max_word = normalize_max_word(max_word);
@@ -76,6 +88,7 @@ pub fn count_words(bytes: &[u8], limit: usize, max_word: usize) -> WordCounts<'_
     WordCounts { total, unique, top }
 }
 
+/// Apply the supported word-length bounds, using the default when given zero.
 #[must_use]
 pub fn normalize_max_word(max_word: usize) -> usize {
     match max_word {
@@ -128,7 +141,12 @@ fn finish_owned_word(counts: &mut WordMap<'_>, word: &[u8]) {
     }
 }
 
+/// Render counts as the benchmark's human-readable table.
 #[must_use]
+#[allow(
+    clippy::let_underscore_must_use,
+    reason = "formatting a String is infallible"
+)]
 pub fn render_text(result: &WordCounts<'_>) -> String {
     let mut output = String::with_capacity(32 * result.top.len() + 32);
     output.push_str("count word\n");
@@ -143,7 +161,12 @@ pub fn render_text(result: &WordCounts<'_>) -> String {
     output
 }
 
+/// Render counts as the benchmark's JSON object.
 #[must_use]
+#[allow(
+    clippy::let_underscore_must_use,
+    reason = "formatting a String is infallible"
+)]
 pub fn render_json(result: &WordCounts<'_>) -> String {
     let mut output = String::with_capacity(40 * result.top.len() + 32);
     let _ = write!(

@@ -1,0 +1,36 @@
+name = "word_frequency_counter"
+version = "0.1.0"
+description = "ASCII word-frequency benchmark implementation."
+license = "MIT"
+author = ["krvh"]
+maintainer = ["krvh"]
+
+[build]
+auto-executables = false
+auto-examples = false
+auto-tests = false
+
+[fortran]
+implicit-external = false
+implicit-typing = false
+source-form = "free"
+
+[library]
+source-dir = "src"
+
+[[executable]]
+name = "wordcount_fortran"
+main = "main.f90"
+source-dir = "app"
+
+[extra.ford]
+author = "krvh"
+display = ["public", "protected"]
+graph = false
+output_dir = "build/doc"
+preprocess = false
+project = "word_frequency_counter"
+search = true
+source = true
+src_dir = ["src"]
+summary = "ASCII word-frequency benchmark implementation."

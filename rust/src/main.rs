@@ -1,3 +1,5 @@
+//! Command-line interface and benchmark adapter.
+
 use std::env;
 use std::fs;
 use std::process::ExitCode;
@@ -123,7 +125,7 @@ fn parse_number(value: &str, name: &str) -> Result<usize, String> {
     }
     value
         .parse()
-        .map_err(|_| format!("wordcount_rust: {name} must be a number"))
+        .map_err(|_error| format!("wordcount_rust: {name} must be a number"))
 }
 
 fn bench_json(bytes: &[u8], top: usize, max_word: usize, runs: usize, warmups: usize) -> String {
