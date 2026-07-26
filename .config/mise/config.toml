@@ -88,7 +88,7 @@ run = "mise tasks"
 description = "Format all maintained sources"
 run = """
 clang_format="$(mise where conda:clang-tools)/bin/clang-format"
-"$clang_format" -i c/include/*.h c/src/*.c cpp/src/*.cpp
+"$clang_format" -i c/src/*.c cpp/src/*.cpp
 cargo fmt --manifest-path rust/Cargo.toml --all
 (cd go && gofumpt -w .)
 prettier --write --cache --list-different README.md scripts/*.ts
@@ -121,7 +121,7 @@ taplo format .config/mise/config.toml
 description = "Check formatting"
 run = """
 clang_format="$(mise where conda:clang-tools)/bin/clang-format"
-"$clang_format" --dry-run --Werror c/include/*.h c/src/*.c cpp/src/*.cpp
+"$clang_format" --dry-run --Werror c/src/*.c cpp/src/*.cpp
 cargo fmt --manifest-path rust/Cargo.toml --all -- --check
 (cd go && test -z "$(gofumpt -l .)")
 prettier --check README.md scripts/*.ts
@@ -162,7 +162,7 @@ run = """
 cmake --fresh --preset clang
 cmake --build --preset clang
 clang_tidy_resource="$(mise where conda:clangxx)/lib/clang/22"
-clang-tidy --extra-arg=-resource-dir="$clang_tidy_resource" c/src/wordfreq.c c/src/main.c cpp/src/main.cpp -p build/c/clang
+clang-tidy --extra-arg=-resource-dir="$clang_tidy_resource" c/src/wordcount.c cpp/src/main.cpp -p build/c/clang
 (cd rust && cargo check --locked --all-targets --all-features && cargo clippy --locked --all-targets --all-features -- -D warnings && RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps && cargo deny check)
 (cd go && go mod tidy -diff && go mod verify && go vet ./... && boringlint ./... && golangci-lint run ./... && govulncheck ./...)
 (cd javascript && bun install --frozen-lockfile && bun run lint:check && bun run typecheck && node --check src/wordcount.js)

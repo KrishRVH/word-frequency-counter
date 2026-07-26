@@ -796,7 +796,9 @@ function createValidationCases(
     },
     {
       name: "ascii-contract",
-      content: "Apple apple APPLE\nfoo-bar\n123abc456\nit's\nz b a\n",
+      content:
+        "Apple apple APPLE\nfoo-bar\n123abc456\nit's\nz b a\n" +
+        "aaaaaaaaa aaaaaaaab aaaaaaaac\n",
       top: 20,
       maxWord: 1024,
     },

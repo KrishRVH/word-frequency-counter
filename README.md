@@ -64,28 +64,28 @@ adjusted CLI result is the safer wall-clock comparison.
 
 ## Implementations
 
-| Language   | Directory     | Idiomatic shape                                                             |
-| ---------- | ------------- | --------------------------------------------------------------------------- |
-| C23        | `c/`          | Library and CLI with explicit ownership and a compact local hash table      |
-| C++23      | `cpp/`        | `std::unordered_map`, `std::from_chars`, vectors, and ranges sorting        |
-| Rust 2024  | `rust/`       | Borrowed byte scanning, ordinary `HashMap`, and explicit rendering          |
-| Go         | `go/`         | Small internal package over byte slices and standard collections            |
-| JavaScript | `javascript/` | Checked ESM using `Uint8Array`, `Map`, and native argument parsing          |
-| TypeScript | `typescript/` | Pure counting core with Effect at file-I/O and failure boundaries           |
-| PHP        | `php/`        | Strict Composer package with immutable result values and a thin bin wrapper |
-| C#         | `csharp/`     | .NET console app with a focused parser and scanner accumulator              |
-| Lua        | `lua/`        | Direct module and executable script over ordinary tables                    |
-| Kotlin     | `kotlin/`     | Strict Gradle JVM app using byte arrays and Kotlin collections              |
-| Elixir     | `elixir/`     | Mix escript and immutable byte reducer                                      |
-| Zig        | `zig/`        | Native build, explicit allocator ownership, and `StringHashMap`             |
-| Haskell    | `haskell/`    | Cabal app with strict `ByteString` folds and pure core functions            |
-| Fortran    | `fortran/`    | fpm app, stream-byte input, modules, and a local hash table                 |
-| SPARK/Ada  | `spark/`      | Proved scanner/checksum core with an Ada I/O and rendering boundary         |
-| GDScript   | `gdscript/`   | Headless Godot script using packed bytes and `Dictionary`                   |
-| Odin       | `odin/`       | Native CLI using the core allocator and standard map                        |
-| Python     | `python/`     | Typed package-style CLI using a dictionary and byte iteration               |
-| Shell      | `shell/`      | Strict Bash pipeline built from standard text tools                         |
-| Roc        | `roc/`        | Pure checked package; see the non-executable exception below                |
+| Language   | Directory     | Idiomatic shape                                                              |
+| ---------- | ------------- | ---------------------------------------------------------------------------- |
+| C23        | `c/`          | One-file borrowed scan, compact local table, and exact stable radix ordering |
+| C++23      | `cpp/`        | `std::unordered_map`, `std::from_chars`, vectors, and ranges sorting         |
+| Rust 2024  | `rust/`       | Borrowed byte scanning, ordinary `HashMap`, and explicit rendering           |
+| Go         | `go/`         | Small internal package over byte slices and standard collections             |
+| JavaScript | `javascript/` | Checked ESM using `Uint8Array`, `Map`, and native argument parsing           |
+| TypeScript | `typescript/` | Pure counting core with Effect at file-I/O and failure boundaries            |
+| PHP        | `php/`        | Strict Composer package with immutable result values and a thin bin wrapper  |
+| C#         | `csharp/`     | .NET console app with a focused parser and scanner accumulator               |
+| Lua        | `lua/`        | Direct module and executable script over ordinary tables                     |
+| Kotlin     | `kotlin/`     | Strict Gradle JVM app using byte arrays and Kotlin collections               |
+| Elixir     | `elixir/`     | Mix escript and immutable byte reducer                                       |
+| Zig        | `zig/`        | Native build, explicit allocator ownership, and `StringHashMap`              |
+| Haskell    | `haskell/`    | Cabal app with strict `ByteString` folds and pure core functions             |
+| Fortran    | `fortran/`    | fpm app, stream-byte input, modules, and a local hash table                  |
+| SPARK/Ada  | `spark/`      | Proved scanner/checksum core with an Ada I/O and rendering boundary          |
+| GDScript   | `gdscript/`   | Headless Godot script using packed bytes and `Dictionary`                    |
+| Odin       | `odin/`       | Native CLI using the core allocator and standard map                         |
+| Python     | `python/`     | Typed package-style CLI using a dictionary and byte iteration                |
+| Shell      | `shell/`      | Strict Bash pipeline built from standard text tools                          |
+| Roc        | `roc/`        | Pure checked package; see the non-executable exception below                 |
 
 ## Toolchains
 
@@ -158,9 +158,9 @@ The `stress` corpus adds repeated-scan and long-word clamp cases.
 
 ## Benchmark Snapshot
 
-Recorded at `2026-07-26T02:32:40.616Z` on Linux
+Recorded at `2026-07-26T05:37:11.591Z` on Linux
 `6.18.33.1-microsoft-standard-WSL2` x64, AMD Ryzen 9 9950X3D, 24 logical
-CPUs, revision `40e5f18+dirty`. Protocol: 5 warm samples, 10 measured
+CPUs, revision `d28ad26+dirty`. Protocol: 5 warm samples, 10 measured
 iterations and 3 warmups per sample, plus 5 CLI samples. The complete toolchain
 matrix emitted by the run includes all mise-managed support tools; the table
 above summarizes its language-facing subset. Because the revision is dirty,
@@ -169,25 +169,25 @@ artifact; rerun it after committing for an artifact-grade record.
 
 | implementation | tiny median ms | small median ms | medium median ms | unique median ms | case-fold median ms | medium worst-of-5 ms | medium MB/s | adjusted CLI median ms | adjusted CLI worst-of-5 ms |
 | -------------- | -------------: | --------------: | ---------------: | ---------------: | ------------------: | -------------------: | ----------: | ---------------------: | -------------------------: |
-| rust           |          0.012 |           0.202 |            1.773 |            1.650 |               1.888 |                1.872 |       282.1 |                  2.583 |                      2.723 |
-| zig            |          0.010 |           0.295 |            2.733 |            3.782 |               2.337 |                2.734 |       182.9 |                  3.532 |                      4.054 |
-| cpp            |          0.014 |           0.301 |            2.763 |            4.335 |               2.318 |                2.783 |       181.0 |                  3.720 |                      3.827 |
-| c              |          0.014 |           0.305 |            2.857 |            4.685 |               2.517 |                2.941 |       175.0 |                  3.952 |                      4.205 |
-| go             |          0.025 |           0.441 |            3.936 |            4.346 |               3.292 |                4.012 |       127.0 |                  4.187 |                      4.630 |
-| fortran        |          0.026 |           0.498 |            4.670 |           10.346 |               5.207 |                4.691 |       107.1 |                  6.429 |                      6.602 |
-| kotlin         |          0.495 |           1.640 |            5.416 |            6.430 |               4.894 |                5.725 |        92.3 |                 43.921 |                     46.650 |
-| odin           |          0.032 |           0.619 |            5.694 |            8.971 |               4.501 |                5.726 |        87.8 |                  6.929 |                      7.191 |
-| csharp         |          0.081 |           1.259 |            7.927 |            7.167 |               6.126 |                7.970 |        63.1 |                 17.022 |                     18.522 |
-| haskell        |          0.127 |           0.883 |            9.236 |            9.777 |              10.067 |                9.267 |        54.1 |                 13.318 |                     13.848 |
-| javascript     |          0.177 |           1.382 |           11.655 |           12.959 |               9.749 |               11.715 |        42.9 |                 20.484 |                     21.841 |
-| typescript     |          0.307 |           2.695 |           13.494 |           13.694 |              12.057 |               14.080 |        37.1 |                 47.649 |                     69.991 |
-| spark          |          0.121 |           1.956 |           16.730 |           19.981 |              14.222 |               16.896 |        29.9 |                 18.505 |                     20.325 |
-| php            |          0.161 |           2.804 |           25.157 |           31.274 |              22.846 |               25.489 |        19.9 |                 26.860 |                     28.236 |
-| python         |          0.219 |           3.498 |           29.532 |           23.420 |              24.135 |               30.319 |        16.9 |                 31.334 |                     32.718 |
-| lua            |          0.404 |           6.482 |           53.950 |           55.437 |              50.446 |               56.869 |         9.3 |                 58.816 |                     59.541 |
-| gdscript       |          0.407 |           7.466 |           66.326 |           94.971 |              59.070 |               66.990 |         7.5 |                102.694 |                    103.151 |
-| elixir         |          0.173 |           2.710 |           71.706 |           68.159 |              60.266 |               72.111 |         7.0 |                 71.667 |                     73.847 |
-| shell          |         15.915 |         203.272 |         1706.704 |         1930.415 |            1654.128 |             1719.218 |         0.3 |               1828.373 |                   1850.610 |
+| c              |          0.006 |           0.072 |            0.694 |            1.131 |               0.721 |                0.708 |       720.7 |                  1.749 |                      1.900 |
+| rust           |          0.012 |           0.204 |            1.790 |            1.660 |               1.862 |                1.822 |       279.3 |                  2.810 |                      3.001 |
+| zig            |          0.010 |           0.304 |            2.748 |            3.787 |               2.337 |                2.773 |       182.0 |                  3.211 |                      3.434 |
+| cpp            |          0.014 |           0.307 |            2.790 |            4.372 |               2.310 |                2.811 |       179.2 |                  3.670 |                      3.871 |
+| go             |          0.025 |           0.442 |            4.037 |            4.335 |               3.267 |                4.135 |       123.9 |                  4.327 |                      4.484 |
+| fortran        |          0.026 |           0.506 |            4.726 |           10.383 |               5.207 |                4.976 |       105.8 |                  6.506 |                      6.583 |
+| kotlin         |          0.520 |           1.682 |            5.482 |            6.692 |               4.920 |                6.042 |        91.2 |                 44.137 |                     57.254 |
+| odin           |          0.032 |           0.631 |            5.739 |            9.132 |               4.474 |                5.897 |        87.1 |                  6.949 |                      7.534 |
+| csharp         |          0.081 |           1.285 |            8.244 |            7.413 |               6.048 |                8.794 |        60.6 |                 18.366 |                     20.435 |
+| haskell        |          0.126 |           0.892 |            9.393 |            9.929 |              10.330 |               10.397 |        53.2 |                 13.438 |                     13.498 |
+| javascript     |          0.171 |           1.392 |           11.610 |           13.079 |               9.627 |               12.744 |        43.1 |                 21.322 |                     25.179 |
+| typescript     |          0.294 |           2.747 |           13.846 |           13.909 |              12.046 |               14.914 |        36.1 |                 48.557 |                     55.878 |
+| spark          |          0.121 |           1.975 |           16.817 |           20.246 |              14.218 |               17.004 |        29.7 |                 18.547 |                     20.958 |
+| php            |          0.158 |           2.843 |           26.130 |           33.657 |              23.252 |               26.509 |        19.1 |                 26.898 |                     27.152 |
+| python         |          0.225 |           3.606 |           30.620 |           24.400 |              25.107 |               31.134 |        16.3 |                 32.589 |                     35.700 |
+| lua            |          0.397 |           6.636 |           54.928 |           56.835 |              50.144 |               55.719 |         9.1 |                 58.533 |                     59.841 |
+| gdscript       |          0.410 |           7.546 |           67.142 |           95.168 |              58.960 |               69.288 |         7.4 |                 93.081 |                    103.384 |
+| elixir         |          0.172 |           2.721 |           72.658 |           68.624 |              60.007 |               73.096 |         6.9 |                 67.928 |                     83.634 |
+| shell          |         16.323 |         211.859 |         1749.855 |         1971.525 |            1690.435 |             1757.114 |         0.3 |               1876.054 |                   1933.478 |
 
 Use the warm medians for the primary scanner comparison. The adjusted CLI
 columns show whole-command wall time after subtracting the empty-input process

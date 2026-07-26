@@ -43,12 +43,7 @@ function(wfc_apply_c_defaults target)
   endif()
 endfunction()
 
-add_library(wordfreq STATIC c/src/wordfreq.c)
-target_include_directories(wordfreq PUBLIC "${PROJECT_SOURCE_DIR}/c/include")
-wfc_apply_c_defaults(wordfreq)
-
-add_executable(wordcount_c c/src/main.c)
-target_link_libraries(wordcount_c PRIVATE wordfreq)
+add_executable(wordcount_c c/src/wordcount.c)
 wfc_apply_c_defaults(wordcount_c)
 
 add_executable(wordcount_cpp cpp/src/main.cpp)
