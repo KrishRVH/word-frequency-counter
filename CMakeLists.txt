@@ -45,7 +45,10 @@ endfunction()
 
 add_executable(wordcount_c c/src/wordcount.c)
 if(NOT WIN32)
-  target_compile_definitions(wordcount_c PRIVATE _POSIX_C_SOURCE=200809L)
+  target_compile_definitions(wordcount_c PRIVATE
+    _FILE_OFFSET_BITS=64
+    _POSIX_C_SOURCE=200809L
+  )
 endif()
 wfc_apply_c_defaults(wordcount_c)
 

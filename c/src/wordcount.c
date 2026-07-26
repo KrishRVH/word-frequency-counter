@@ -1,3 +1,11 @@
+// wordcount -- report the most frequent words in a file.
+//
+// A word is a maximal run of ASCII letters. Words are compared
+// case-insensitively and printed in lower case. A run longer than the
+// effective --max-word value is represented by that prefix alone. Omitting
+// --max-word uses 1024; explicitly passing 0 uses 64; other values clamp to
+// [4, 1024]. Results are ordered by descending count, then ascending word.
+
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -11,6 +19,8 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#else
+#include <sys/types.h>
 #endif
 
 enum {
@@ -586,12 +596,12 @@ static int file_length(FILE *file, size_t *length)
         return -1;
     }
 #else
-    if (fseek(file, 0, SEEK_END) != 0) {
+    if (fseeko(file, 0, SEEK_END) != 0) {
         return -1;
     }
-    long end = ftell(file);
+    off_t end = ftello(file);
     if (end < 0 || (uintmax_t)end > (uintmax_t)SIZE_MAX ||
-        fseek(file, 0, SEEK_SET) != 0) {
+        fseeko(file, 0, SEEK_SET) != 0) {
         return -1;
     }
 #endif
