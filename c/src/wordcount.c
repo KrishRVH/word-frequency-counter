@@ -1,10 +1,3 @@
-#if !defined(_WIN32)
-// POSIX reserves this feature-test macro for applications.
-// NOLINTNEXTLINE(bugprone-reserved-identifier,cert-dcl37-c,cert-dcl51-cpp)
-#define _POSIX_C_SOURCE 200809L
-#endif
-
-#include <errno.h>
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -12,16 +5,21 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+
 #if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
 #include <windows.h>
 #endif
 
 enum {
-    DEFAULT_MAX_WORD = 64,
-    ESTIMATED_BYTES_PER_UNIQUE_WORD = 32,
-    INITIAL_CAPACITY = 16,
-    MAX_WORD = 1024,
-    MIN_WORD = 4
+    DEFAULT_TOP = 10,
+    MIN_WORD_LIMIT = 4,
+    ZERO_WORD_LIMIT = 64,
+    MAX_WORD_LIMIT = 1024,
+    DEFAULT_WORD_LIMIT = MAX_WORD_LIMIT,
+    INITIAL_CAPACITY = 16
 };
 
 static const uint64_t FNV_OFFSET_BASIS = UINT64_C(0xcbf29ce484222325);
@@ -38,12 +36,8 @@ typedef struct {
     bool json;
 } Options;
 
-typedef struct {
-    char *word;
-    uint64_t count;
-    uint64_t lex_prefix;
-} Entry;
-
+// Slot words borrow storage from the input buffer. Table capacity remains a
+// power of two, and insertion keeps the table at or below three-quarter load.
 typedef struct {
     const unsigned char *word;
     size_t length;
@@ -54,10 +48,15 @@ typedef struct {
 typedef struct {
     Slot *slots;
     size_t capacity;
-    size_t length;
+    size_t used;
     size_t word_bytes;
     uint64_t total;
 } Table;
+
+typedef struct {
+    const char *word;
+    uint64_t count;
+} Entry;
 
 typedef struct {
     Entry *entries;
@@ -65,64 +64,102 @@ typedef struct {
     uint64_t total;
 } Result;
 
-typedef struct {
-    const char *name;
-    size_t *target;
-} NumberOption;
-
-typedef enum {
-    SORT_PREFIX,
-    SORT_COUNT
-} SortKey;
-
-// Counting
-
-static bool is_letter(unsigned char byte)
+static unsigned char ascii_lower(unsigned char byte)
 {
-    unsigned int lower = (unsigned int)byte | 0x20u;
-    return lower - (unsigned int)'a' <= (unsigned int)'z' - (unsigned int)'a';
+    return (unsigned char)(byte | 0x20u);
 }
 
-static size_t normalize_max_word(size_t value)
+static bool is_ascii_letter(unsigned char byte)
 {
-    if (value == 0u) {
-        return DEFAULT_MAX_WORD;
-    }
-    if (value < MIN_WORD) {
-        return MIN_WORD;
-    }
-    return value > MAX_WORD ? MAX_WORD : value;
+    unsigned char lower = ascii_lower(byte);
+    return lower >= (unsigned char)'a' && lower <= (unsigned char)'z';
 }
 
-static size_t capacity_for(size_t bytes)
+static size_t normalize_word_limit(size_t value)
 {
-    size_t expected = bytes / ESTIMATED_BYTES_PER_UNIQUE_WORD;
-    size_t needed = (expected * 4u + 2u) / 3u;
-    size_t capacity = INITIAL_CAPACITY;
-    while (capacity < needed) {
-        capacity *= 2u;
+    if (value == 0) {
+        return ZERO_WORD_LIMIT;
     }
-    return capacity;
+    if (value < MIN_WORD_LIMIT) {
+        return MIN_WORD_LIMIT;
+    }
+    return value > MAX_WORD_LIMIT ? MAX_WORD_LIMIT : value;
 }
 
-static int table_resize(Table *table, size_t capacity)
+static int table_init(Table *table)
 {
+    *table = (Table){ 0 };
+    table->slots = calloc(INITIAL_CAPACITY, sizeof(*table->slots));
+    if (table->slots == NULL) {
+        return -1;
+    }
+    table->capacity = INITIAL_CAPACITY;
+    return 0;
+}
+
+static void table_destroy(Table *table)
+{
+    free(table->slots);
+    *table = (Table){ 0 };
+}
+
+static bool slot_matches(const Slot *slot,
+                         const unsigned char *word,
+                         size_t length,
+                         uint64_t hash)
+{
+    if (slot->hash != hash || slot->length != length) {
+        return false;
+    }
+
+    for (size_t i = 0; i < length; i++) {
+        if (ascii_lower(slot->word[i]) != ascii_lower(word[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Return the matching slot, or the empty slot where the word belongs.
+static inline Slot *table_probe(Table *table,
+                                const unsigned char *word,
+                                size_t length,
+                                uint64_t hash)
+{
+    size_t mask = table->capacity - 1;
+    size_t index = (size_t)hash & mask;
+
+    for (;;) {
+        Slot *slot = &table->slots[index];
+        if (slot->word == NULL || slot_matches(slot, word, length, hash)) {
+            return slot;
+        }
+        index = (index + 1) & mask;
+    }
+}
+
+static int table_grow(Table *table)
+{
+    if (table->capacity > SIZE_MAX / 2) {
+        return -1;
+    }
+
+    size_t capacity = table->capacity * 2;
+    if (capacity > SIZE_MAX / sizeof(*table->slots)) {
+        return -1;
+    }
+
     Slot *slots = calloc(capacity, sizeof(*slots));
     if (slots == NULL) {
         return -1;
     }
 
+    Table grown = { .slots = slots, .capacity = capacity };
     for (size_t i = 0; i < table->capacity; i++) {
         Slot slot = table->slots[i];
-        if (slot.word == NULL) {
-            continue;
+        if (slot.word != NULL) {
+            *table_probe(&grown, slot.word, slot.length, slot.hash) = slot;
         }
-
-        size_t index = (size_t)slot.hash & (capacity - 1u);
-        while (slots[index].word != NULL) {
-            index = (index + 1u) & (capacity - 1u);
-        }
-        slots[index] = slot;
     }
 
     free(table->slots);
@@ -131,135 +168,136 @@ static int table_resize(Table *table, size_t capacity)
     return 0;
 }
 
-static bool
-same_word(const Slot *slot, const unsigned char *word, size_t length)
-{
-    if (slot->length != length) {
-        return false;
-    }
-    for (size_t i = 0; i < length; i++) {
-        if ((slot->word[i] | (unsigned char)0x20u) !=
-            (word[i] | (unsigned char)0x20u)) {
-            return false;
-        }
-    }
-    return true;
-}
-
 static int
 table_add(Table *table, const unsigned char *word, size_t length, uint64_t hash)
 {
-    size_t index = (size_t)hash & (table->capacity - 1u);
-    while (table->slots[index].word != NULL) {
-        Slot *slot = &table->slots[index];
-        if (slot->hash == hash && same_word(slot, word, length)) {
-            slot->count++;
-            table->total++;
-            return 0;
-        }
-        index = (index + 1u) & (table->capacity - 1u);
+    Slot *slot = table_probe(table, word, length, hash);
+    if (slot->word != NULL) {
+        slot->count++;
+        table->total++;
+        return 0;
     }
 
-    if (table->length + 1u > table->capacity - table->capacity / 4u) {
-        if (table->capacity > SIZE_MAX / 2u ||
-            table_resize(table, table->capacity * 2u) != 0) {
-            return -1;
-        }
-        index = (size_t)hash & (table->capacity - 1u);
-        while (table->slots[index].word != NULL) {
-            index = (index + 1u) & (table->capacity - 1u);
-        }
-    }
-
-    if (table->word_bytes > SIZE_MAX - length - 1u) {
+    if (length == SIZE_MAX || table->word_bytes > SIZE_MAX - length - 1) {
         return -1;
     }
-    table->slots[index] =
-            (Slot){ .word = word, .length = length, .count = 1u, .hash = hash };
-    table->length++;
-    table->word_bytes += length + 1u;
+
+    if (table->used >= table->capacity - table->capacity / 4) {
+        if (table_grow(table) != 0) {
+            return -1;
+        }
+        slot = table_probe(table, word, length, hash);
+    }
+
+    *slot = (Slot){
+        .word = word,
+        .length = length,
+        .count = 1,
+        .hash = hash,
+    };
+    table->used++;
+    table->word_bytes += length + 1;
     table->total++;
     return 0;
 }
 
-// Ordering
+static int tally_words(Table *table,
+                       const unsigned char *data,
+                       size_t length,
+                       size_t max_word)
+{
+    const unsigned char *cursor = data;
+    const unsigned char *end = data + length;
 
-static int compare_words(const void *left_pointer, const void *right_pointer)
+    while (cursor != end) {
+        while (cursor != end && !is_ascii_letter(*cursor)) {
+            cursor++;
+        }
+        if (cursor == end) {
+            break;
+        }
+
+        const unsigned char *word = cursor;
+        size_t stored = 0;
+        uint64_t hash = FNV_OFFSET_BASIS;
+
+        // Consume the complete run, but retain only its configured prefix.
+        while (cursor != end && is_ascii_letter(*cursor)) {
+            if (stored < max_word) {
+                hash = (hash ^ (uint64_t)ascii_lower(*cursor)) * FNV_PRIME;
+                stored++;
+            }
+            cursor++;
+        }
+
+        if (table_add(table, word, stored, hash) != 0) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
+static int compare_entries(const void *left_pointer, const void *right_pointer)
 {
     const Entry *left = left_pointer;
     const Entry *right = right_pointer;
+
+    if (left->count < right->count) {
+        return 1;
+    }
+    if (left->count > right->count) {
+        return -1;
+    }
     return strcmp(left->word, right->word);
 }
 
-static void
-radix_sort(Entry *entries, Entry *scratch, size_t length, SortKey sort_key)
+static void copy_normalized_word(char *destination, const Slot *slot)
 {
-    if (length < 2u) {
-        return;
+    for (size_t i = 0; i < slot->length; i++) {
+        destination[i] = (char)ascii_lower(slot->word[i]);
     }
-    uint64_t first_key =
-            sort_key == SORT_COUNT ? ~entries[0].count : entries[0].lex_prefix;
-    uint64_t varying_bits = 0u;
-    for (size_t i = 1u; i < length; i++) {
-        uint64_t key = sort_key == SORT_COUNT ? ~entries[i].count
-                                              : entries[i].lex_prefix;
-        varying_bits |= first_key ^ key;
-    }
-
-    Entry *source = entries;
-    Entry *target = scratch;
-    for (unsigned int shift = 0u; varying_bits != 0u;
-         shift += 8u, varying_bits >>= 8u) {
-        size_t offsets[256] = { 0 };
-        for (size_t i = 0u; i < length; i++) {
-            uint64_t key = sort_key == SORT_COUNT ? ~source[i].count
-                                                  : source[i].lex_prefix;
-            offsets[(key >> shift) & UINT64_C(0xff)]++;
-        }
-
-        size_t total = 0u;
-        for (size_t i = 0u; i < 256u; i++) {
-            size_t count = offsets[i];
-            offsets[i] = total;
-            total += count;
-        }
-        for (size_t i = 0u; i < length; i++) {
-            uint64_t key = sort_key == SORT_COUNT ? ~source[i].count
-                                                  : source[i].lex_prefix;
-            target[offsets[(key >> shift) & UINT64_C(0xff)]++] = source[i];
-        }
-
-        Entry *swap = source;
-        source = target;
-        target = swap;
-    }
-    if (source != entries) {
-        for (size_t i = 0u; i < length; i++) {
-            entries[i] = source[i];
-        }
-    }
+    destination[slot->length] = '\0';
 }
 
-static void sort_entries(Entry *entries, Entry *scratch, size_t length)
+static int table_to_result(const Table *table, Result *result)
 {
-    // Stable prefix passes establish lexical order; qsort resolves words with
-    // equal eight-byte prefixes. Stable count passes then preserve those ties.
-    radix_sort(entries, scratch, length, SORT_PREFIX);
-    for (size_t first = 0u; first < length;) {
-        size_t last = first + 1u;
-        while (last < length &&
-               entries[last].lex_prefix == entries[first].lex_prefix) {
-            last++;
-        }
-        if (last - first > 1u) {
-            qsort(entries + first,
-                  last - first,
-                  sizeof(*entries),
-                  compare_words);
-        }
-        first = last;
+    Result output = { .total = table->total };
+    if (table->used == 0) {
+        *result = output;
+        return 0;
     }
-    radix_sort(entries, scratch, length, SORT_COUNT);
+
+    if (table->used >
+        (SIZE_MAX - table->word_bytes) / sizeof(*output.entries)) {
+        return -1;
+    }
+
+    size_t allocation =
+            table->used * sizeof(*output.entries) + table->word_bytes;
+    Entry *entries = malloc(allocation);
+    if (entries == NULL) {
+        return -1;
+    }
+
+    // One allocation owns both the entries and their normalized words.
+    Entry *entry = entries;
+    char *word = (char *)(entries + table->used);
+    for (size_t i = 0; i < table->capacity; i++) {
+        const Slot *slot = &table->slots[i];
+        if (slot->word == NULL) {
+            continue;
+        }
+
+        copy_normalized_word(word, slot);
+        *entry++ = (Entry){ .word = word, .count = slot->count };
+        word += slot->length + 1;
+    }
+
+    qsort(entries, table->used, sizeof(*entries), compare_entries);
+    output.entries = entries;
+    output.unique = table->used;
+    *result = output;
+    return 0;
 }
 
 static int count_words(const unsigned char *data,
@@ -268,101 +306,45 @@ static int count_words(const unsigned char *data,
                        Result *result)
 {
     *result = (Result){ 0 };
-    size_t capacity = capacity_for(length);
-    Table table = { 0 };
-    if (table_resize(&table, capacity) != 0) {
+
+    Table table;
+    if (table_init(&table) != 0) {
         return -1;
     }
 
-    size_t max_word = normalize_max_word(requested_max_word);
-    size_t cursor = 0u;
-    while (cursor < length) {
-        while (cursor < length && !is_letter(data[cursor])) {
-            cursor++;
-        }
-        if (cursor == length) {
-            break;
-        }
-
-        size_t start = cursor;
-        size_t stored = 0u;
-        uint64_t hash = FNV_OFFSET_BASIS;
-        while (cursor < length && is_letter(data[cursor])) {
-            if (stored < max_word) {
-                unsigned char lower = data[cursor] | (unsigned char)0x20u;
-                hash = (hash ^ (uint64_t)lower) * FNV_PRIME;
-                stored++;
-            }
-            cursor++;
-        }
-
-        if (table_add(&table, data + start, stored, hash) < 0) {
-            free(table.slots);
-            return -1;
-        }
+    int status = tally_words(
+            &table, data, length, normalize_word_limit(requested_max_word));
+    if (status == 0) {
+        status = table_to_result(&table, result);
     }
 
-    result->total = table.total;
-    if (table.length == 0u) {
-        free(table.slots);
-        return 0;
-    }
-    if (table.length >
-        (SIZE_MAX - table.word_bytes) / (2u * sizeof(*result->entries))) {
-        free(table.slots);
-        return -1;
-    }
-    // One allocation owns [entries][radix scratch][normalized words].
-    result->entries = malloc(2u * table.length * sizeof(*result->entries) +
-                             table.word_bytes);
-    if (result->entries == NULL) {
-        free(table.slots);
-        return -1;
-    }
-
-    Entry *scratch = result->entries + table.length;
-    size_t output = 0u;
-    char *word = (char *)(scratch + table.length);
-    for (size_t i = 0; i < table.capacity; i++) {
-        Slot *slot = &table.slots[i];
-        if (slot->word != NULL) {
-            uint64_t lex_prefix = 0u;
-            for (size_t byte = 0; byte < slot->length; byte++) {
-                unsigned char lower = slot->word[byte] | (unsigned char)0x20u;
-                word[byte] = (char)lower;
-                if (byte < sizeof(lex_prefix)) {
-                    lex_prefix = lex_prefix << 8u | (uint64_t)lower;
-                }
-            }
-            for (size_t byte = slot->length; byte < sizeof(lex_prefix);
-                 byte++) {
-                lex_prefix <<= 8u;
-            }
-            word[slot->length] = '\0';
-            result->entries[output++] = (Entry){ .word = word,
-                                                 .count = slot->count,
-                                                 .lex_prefix = lex_prefix };
-            word += slot->length + 1u;
-        }
-    }
-
-    result->unique = output;
-    free(table.slots);
-    sort_entries(result->entries, scratch, output);
-    return 0;
+    table_destroy(&table);
+    return status;
 }
 
-// CLI and benchmark adapter
+static void result_destroy(Result *result)
+{
+    free(result->entries);
+    *result = (Result){ 0 };
+}
 
+static size_t shown_entries(const Result *result, size_t top)
+{
+    return result->unique < top ? result->unique : top;
+}
+
+// Result words contain only lowercase ASCII letters, so their JSON strings
+// require no escaping.
 static void print_json(const Result *result, size_t top)
 {
-    size_t limit = result->unique < top ? result->unique : top;
+    size_t limit = shown_entries(result, top);
+
     printf("{\"total\":%" PRIu64 ",\"unique\":%zu,\"top\":[",
            result->total,
            result->unique);
     for (size_t i = 0; i < limit; i++) {
         printf("%s{\"word\":\"%s\",\"count\":%" PRIu64 "}",
-               i == 0u ? "" : ",",
+               i == 0 ? "" : ",",
                result->entries[i].word,
                result->entries[i].count);
     }
@@ -371,7 +353,8 @@ static void print_json(const Result *result, size_t top)
 
 static void print_table(const Result *result, size_t top)
 {
-    size_t limit = result->unique < top ? result->unique : top;
+    size_t limit = shown_entries(result, top);
+
     puts("count word");
     for (size_t i = 0; i < limit; i++) {
         printf("%" PRIu64 " %s\n",
@@ -379,6 +362,24 @@ static void print_table(const Result *result, size_t top)
                result->entries[i].word);
     }
     printf("total %" PRIu64 "\nunique %zu\n", result->total, result->unique);
+}
+
+static int
+print_report(const unsigned char *data, size_t length, const Options *options)
+{
+    Result result;
+    if (count_words(data, length, options->max_word, &result) != 0) {
+        return -1;
+    }
+
+    if (options->json) {
+        print_json(&result, options->top);
+    } else {
+        print_table(&result, options->top);
+    }
+
+    result_destroy(&result);
+    return 0;
 }
 
 static uint32_t mix_byte(uint32_t checksum, unsigned char byte)
@@ -390,25 +391,25 @@ static uint32_t mix_integer(uint32_t checksum, uint64_t value, size_t width)
 {
     for (size_t i = 0; i < width; i++) {
         checksum = mix_byte(checksum, (unsigned char)(value & UINT64_C(0xff)));
-        value >>= 8u;
+        value >>= 8;
     }
     return checksum;
 }
 
 static uint32_t checksum_result(const Result *result, size_t top)
 {
-    size_t limit = result->unique < top ? result->unique : top;
     uint32_t checksum = CHECKSUM_OFFSET;
-    checksum = mix_integer(checksum, result->total, 8u);
-    checksum = mix_integer(checksum, (uint64_t)result->unique, 8u);
+    checksum = mix_integer(checksum, result->total, 8);
+    checksum = mix_integer(checksum, (uint64_t)result->unique, 8);
 
+    size_t limit = shown_entries(result, top);
     for (size_t i = 0; i < limit; i++) {
         const unsigned char *word =
                 (const unsigned char *)result->entries[i].word;
         while (*word != '\0') {
             checksum = mix_byte(checksum, *word++);
         }
-        checksum = mix_integer(checksum, result->entries[i].count, 8u);
+        checksum = mix_integer(checksum, result->entries[i].count, 8);
     }
     return checksum;
 }
@@ -416,41 +417,56 @@ static uint32_t checksum_result(const Result *result, size_t top)
 static double now_ms(void)
 {
 #if defined(_WIN32)
-    LARGE_INTEGER frequency;
-    LARGE_INTEGER counter;
+    LARGE_INTEGER frequency = { 0 };
+    LARGE_INTEGER counter = { 0 };
+
     (void)QueryPerformanceFrequency(&frequency);
     (void)QueryPerformanceCounter(&counter);
+    if (frequency.QuadPart == 0) {
+        return 0.0;
+    }
     return (double)counter.QuadPart * 1000.0 / (double)frequency.QuadPart;
 #else
-    struct timespec time;
-    (void)clock_gettime(CLOCK_MONOTONIC, &time);
-    return (double)time.tv_sec * 1000.0 + (double)time.tv_nsec / 1000000.0;
+    struct timespec now = { 0 };
+
+    (void)clock_gettime(CLOCK_MONOTONIC, &now);
+    return (double)now.tv_sec * 1000.0 + (double)now.tv_nsec / 1000000.0;
 #endif
+}
+
+static int benchmark_once(const unsigned char *data,
+                          size_t length,
+                          const Options *options,
+                          uint32_t *checksum)
+{
+    Result result;
+    if (count_words(data, length, options->max_word, &result) != 0) {
+        return -1;
+    }
+
+    *checksum = checksum_result(&result, options->top);
+    result_destroy(&result);
+    return 0;
 }
 
 static int print_benchmark(const unsigned char *data,
                            size_t length,
                            const Options *options)
 {
+    uint32_t run_checksum = 0;
     for (size_t i = 0; i < options->bench_warmups; i++) {
-        Result result = { 0 };
-        if (count_words(data, length, options->max_word, &result) != 0) {
+        if (benchmark_once(data, length, options, &run_checksum) != 0) {
             return -1;
         }
-        (void)checksum_result(&result, options->top);
-        free(result.entries);
     }
 
     uint32_t checksum = CHECKSUM_OFFSET;
     double started = now_ms();
     for (size_t i = 0; i < options->bench_runs; i++) {
-        Result result = { 0 };
-        if (count_words(data, length, options->max_word, &result) != 0) {
+        if (benchmark_once(data, length, options, &run_checksum) != 0) {
             return -1;
         }
-        uint32_t run_checksum = checksum_result(&result, options->top);
-        free(result.entries);
-        checksum = mix_integer(checksum, run_checksum, 4u);
+        checksum = mix_integer(checksum, run_checksum, 4);
     }
 
     double mean_ms = (now_ms() - started) / (double)options->bench_runs;
@@ -460,27 +476,60 @@ static int print_benchmark(const unsigned char *data,
 
 static int parse_size(const char *text, size_t *value)
 {
-    if (*text == '\0' || strspn(text, "0123456789") != strlen(text)) {
+    if (*text == '\0') {
         return -1;
     }
-    errno = 0;
-    unsigned long long parsed = strtoull(text, NULL, 10);
-    if (errno == ERANGE || parsed > SIZE_MAX) {
-        return -1;
+
+    size_t parsed = 0;
+    while (*text != '\0') {
+        unsigned char byte = (unsigned char)*text++;
+        if (byte < (unsigned char)'0' || byte > (unsigned char)'9') {
+            return -1;
+        }
+
+        size_t digit = (size_t)(byte - (unsigned char)'0');
+        if (parsed > (SIZE_MAX - digit) / 10) {
+            return -1;
+        }
+        parsed = parsed * 10 + digit;
     }
-    *value = (size_t)parsed;
+
+    *value = parsed;
     return 0;
+}
+
+// Accept --name=value and --name value. Return NULL for another option.
+static const char *option_value(const char *name,
+                                const char *argument,
+                                int argc,
+                                char **argv,
+                                int *index)
+{
+    size_t length = strlen(name);
+
+    if (strncmp(argument, name, length) != 0) {
+        return NULL;
+    }
+    if (argument[length] == '=') {
+        return argument + length + 1;
+    }
+    if (argument[length] != '\0' || *index + 1 == argc) {
+        return NULL;
+    }
+    return argv[++*index];
 }
 
 static int parse_options(int argc, char **argv, Options *options)
 {
-    *options = (Options){ .path = NULL,
-                          .top = 10u,
-                          .max_word = 1024u,
-                          .bench_runs = 0u,
-                          .bench_warmups = 0u,
-                          .json = false };
-    NumberOption numbers[] = {
+    *options = (Options){
+        .top = DEFAULT_TOP,
+        .max_word = DEFAULT_WORD_LIMIT,
+    };
+
+    const struct {
+        const char *name;
+        size_t *target;
+    } number_options[] = {
         { "--top", &options->top },
         { "--max-word", &options->max_word },
         { "--bench-runs", &options->bench_runs },
@@ -489,45 +538,66 @@ static int parse_options(int argc, char **argv, Options *options)
 
     for (int i = 1; i < argc; i++) {
         const char *argument = argv[i];
+        if (argument == NULL) {
+            return -1;
+        }
         if (strcmp(argument, "--json") == 0) {
             options->json = true;
             continue;
         }
 
         bool matched = false;
-        for (size_t option = 0; option < sizeof(numbers) / sizeof(numbers[0]);
+        for (size_t option = 0;
+             option < sizeof(number_options) / sizeof(*number_options);
              option++) {
-            size_t name_length = strlen(numbers[option].name);
-            const char *value = NULL;
-            if (strcmp(argument, numbers[option].name) == 0) {
-                if (++i == argc) {
-                    return -1;
-                }
-                value = argv[i];
-            } else if (strncmp(argument, numbers[option].name, name_length) ==
-                               0 &&
-                       argument[name_length] == '=') {
-                value = argument + name_length + 1u;
+            const char *value = option_value(
+                    number_options[option].name, argument, argc, argv, &i);
+            if (value == NULL) {
+                continue;
             }
-
-            if (value != NULL) {
-                if (parse_size(value, numbers[option].target) != 0) {
-                    return -1;
-                }
-                matched = true;
-                break;
-            }
-        }
-
-        if (!matched) {
-            if (argument[0] == '-' || options->path != NULL) {
+            if (parse_size(value, number_options[option].target) != 0) {
                 return -1;
             }
-            options->path = argument;
+            matched = true;
+            break;
         }
+        if (matched) {
+            continue;
+        }
+
+        if (argument[0] == '-' || options->path != NULL) {
+            return -1;
+        }
+        options->path = argument;
     }
 
-    return options->path == NULL || options->top == 0u ? -1 : 0;
+    return options->path != NULL && options->top != 0 ? 0 : -1;
+}
+
+static int file_length(FILE *file, size_t *length)
+{
+#if defined(_WIN32)
+    if (_fseeki64(file, 0, SEEK_END) != 0) {
+        return -1;
+    }
+    int64_t end = _ftelli64(file);
+    if (end < 0 || (uintmax_t)end > (uintmax_t)SIZE_MAX ||
+        _fseeki64(file, 0, SEEK_SET) != 0) {
+        return -1;
+    }
+#else
+    if (fseek(file, 0, SEEK_END) != 0) {
+        return -1;
+    }
+    long end = ftell(file);
+    if (end < 0 || (uintmax_t)end > (uintmax_t)SIZE_MAX ||
+        fseek(file, 0, SEEK_SET) != 0) {
+        return -1;
+    }
+#endif
+
+    *length = (size_t)end;
+    return 0;
 }
 
 static int read_file(const char *path, unsigned char **data, size_t *length)
@@ -536,31 +606,35 @@ static int read_file(const char *path, unsigned char **data, size_t *length)
     if (file == NULL) {
         return -1;
     }
-    if (fseek(file, 0, SEEK_END) != 0) {
-        (void)fclose(file);
-        return -1;
+
+    unsigned char *buffer = NULL;
+    size_t size;
+    if (file_length(file, &size) != 0) {
+        goto fail;
     }
-    long file_size = ftell(file);
-    if (file_size < 0 || fseek(file, 0, SEEK_SET) != 0) {
-        (void)fclose(file);
+
+    buffer = malloc(size == 0 ? 1 : size);
+    if (buffer == NULL) {
+        goto fail;
+    }
+
+    if (size != 0 && fread(buffer, 1, size, file) != size) {
+        goto fail;
+    }
+
+    if (fclose(file) != 0) {
+        free(buffer);
         return -1;
     }
 
-    *length = (size_t)file_size;
-    *data = malloc(*length == 0u ? 1u : *length);
-    if (*data == NULL) {
-        (void)fclose(file);
-        return -1;
-    }
-
-    bool read_ok = *length == 0u || fread(*data, 1u, *length, file) == *length;
-    bool close_ok = fclose(file) == 0;
-    if (!read_ok || !close_ok) {
-        free(*data);
-        *data = NULL;
-        return -1;
-    }
+    *data = buffer;
+    *length = size;
     return 0;
+
+fail:
+    free(buffer);
+    (void)fclose(file);
+    return -1;
 }
 
 int main(int argc, char **argv)
@@ -573,8 +647,8 @@ int main(int argc, char **argv)
         return 2;
     }
 
-    unsigned char *data = NULL;
-    size_t length = 0u;
+    unsigned char *data;
+    size_t length;
     if (read_file(options.path, &data, &length) != 0) {
         (void)fputs("wordcount_c: cannot read ", stderr);
         (void)fputs(options.path, stderr);
@@ -582,30 +656,21 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    if (options.bench_runs > 0u) {
-        int status = print_benchmark(data, length, &options);
-        free(data);
-        if (status != 0) {
-            (void)fputs("wordcount_c: out of memory\n", stderr);
-            return 1;
-        }
-        return 0;
+    int status;
+    if (options.bench_runs > 0) {
+        status = print_benchmark(data, length, &options);
+    } else {
+        status = print_report(data, length, &options);
     }
+    free(data);
 
-    Result result = { 0 };
-    if (count_words(data, length, options.max_word, &result) != 0) {
-        free(data);
+    if (status != 0) {
         (void)fputs("wordcount_c: out of memory\n", stderr);
         return 1;
     }
-
-    if (options.json) {
-        print_json(&result, options.top);
-    } else {
-        print_table(&result, options.top);
+    if (fflush(stdout) == EOF || ferror(stdout)) {
+        (void)fputs("wordcount_c: cannot write output\n", stderr);
+        return 1;
     }
-
-    free(result.entries);
-    free(data);
     return 0;
 }
